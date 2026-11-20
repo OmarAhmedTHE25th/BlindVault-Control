@@ -40,7 +40,7 @@ async def start_benchmark_server(
 ) -> uvicorn.Server:
     test_redis_store = RedisStore(client=fake_redis)
     test_rate_limiter = RateLimiter(fake_redis)
-    test_signaling = SignalingManager()
+    test_signaling = SignalingManager(redis_store=test_redis_store)
     test_relay = RelayManager(test_redis_store)
 
     app.state.redis_store = test_redis_store
@@ -52,6 +52,7 @@ async def start_benchmark_server(
 
     app.state.signaling_manager = test_signaling
     app.state.relay_manager = test_relay
+    app.state.udp_port_override = 0
 
     config = uvicorn.Config(
         app,

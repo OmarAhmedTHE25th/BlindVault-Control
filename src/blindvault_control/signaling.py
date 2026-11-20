@@ -1,6 +1,7 @@
 """WebSocket control channel handling authentication, heartbeats, pairing, and signaling."""
 
 import asyncio
+import contextlib
 import json
 import secrets
 from typing import Any
@@ -43,40 +44,132 @@ logger = structlog.get_logger()
 
 
 class SignalingManager:
-    """Maintains active in-memory WebSocket connections for authenticated peers."""
+    """Maintains active WebSocket connections and cross-replica Redis Pub/Sub routing."""
 
-    def __init__(self) -> None:
+    def __init__(self, redis_store: RedisStore | None = None) -> None:
         self.active_peers: dict[str, WebSocket] = {}
         self._lock = asyncio.Lock()
+        self._redis_store = redis_store
+        self._pubsub: Any = None
+        self._listener_task: asyncio.Task[None] | None = None
+        self._subscribed: set[str] = set()
+
+    def _ensure_pubsub_started(self) -> None:
+        if self._redis_store is None:
+            return
+        if self._pubsub is None:
+            self._pubsub = self._redis_store.create_pubsub()
+        if self._listener_task is None or self._listener_task.done():
+            self._listener_task = asyncio.create_task(self._pubsub_loop())
+
+    async def _pubsub_loop(self) -> None:
+        """Listen on bv:peer:* channels and forward messages to local WebSocket peers."""
+        try:
+            while self._pubsub is not None:
+                if not self._subscribed:
+                    await asyncio.sleep(0.02)
+                    continue
+                try:
+                    msg = await self._pubsub.get_message(
+                        ignore_subscribe_messages=True,
+                        timeout=0.05,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    await asyncio.sleep(0.02)
+                    continue
+
+                if msg is None:
+                    continue
+                if msg.get("type") != "message":
+                    continue
+                channel = str(msg.get("channel", ""))
+                if not channel.startswith("bv:peer:"):
+                    continue
+                target_fp = channel.removeprefix("bv:peer:")
+                raw_data = msg.get("data")
+                if raw_data is None:
+                    continue
+                payload_text = (
+                    raw_data.decode("utf-8") if isinstance(raw_data, bytes) else str(raw_data)
+                )
+
+                async with self._lock:
+                    ws = self.active_peers.get(target_fp)
+                if ws is not None:
+                    try:
+                        await ws.send_text(payload_text)
+                    except Exception as exc:
+                        logger.warning(
+                            "pubsub_forward_to_peer_failed",
+                            target=target_fp,
+                            error=str(exc),
+                        )
+        except asyncio.CancelledError:
+            pass
 
     async def register(self, fingerprint: str, ws: WebSocket) -> None:
-        """Register active WebSocket connection for an authenticated peer."""
+        """Register active WebSocket connection and subscribe to its Pub/Sub channel."""
         async with self._lock:
             self.active_peers[fingerprint] = ws
+            if self._redis_store is not None:
+                self._ensure_pubsub_started()
+                channel = f"bv:peer:{fingerprint}"
+                if self._pubsub is not None and channel not in self._subscribed:
+                    await self._pubsub.subscribe(channel)
+                    self._subscribed.add(channel)
         logger.info("peer_registered", fingerprint=fingerprint)
 
     async def unregister(self, fingerprint: str, ws: WebSocket) -> None:
-        """Unregister active WebSocket connection on disconnect."""
+        """Unregister active WebSocket connection and unsubscribe its Pub/Sub channel."""
         async with self._lock:
             current = self.active_peers.get(fingerprint)
             if current is ws:
                 del self.active_peers[fingerprint]
+                channel = f"bv:peer:{fingerprint}"
+                if self._pubsub is not None and channel in self._subscribed:
+                    with contextlib.suppress(Exception):
+                        await self._pubsub.unsubscribe(channel)
+                    self._subscribed.discard(channel)
         logger.info("peer_unregistered", fingerprint=fingerprint)
 
+    async def close(self) -> None:
+        """Shut down the Redis Pub/Sub listener task and connection."""
+        if self._listener_task is not None:
+            self._listener_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._listener_task
+            self._listener_task = None
+        if self._pubsub is not None:
+            with contextlib.suppress(Exception):
+                await self._pubsub.aclose()
+            self._pubsub = None
+        self._subscribed.clear()
+
     async def send_to_peer(self, fingerprint: str, message: dict[str, Any]) -> bool:
-        """Forward a message dictionary to a target peer if online."""
+        """Forward a message locally or across replicas via Redis Pub/Sub."""
         async with self._lock:
             ws = self.active_peers.get(fingerprint)
 
-        if not ws:
-            return False
+        serialized = json.dumps(message)
+        if ws is not None:
+            try:
+                await ws.send_text(serialized)
+                return True
+            except Exception as exc:
+                logger.warning("forward_to_peer_failed", target=fingerprint, error=str(exc))
+                return False
 
-        try:
-            await ws.send_text(json.dumps(message))
-            return True
-        except Exception as exc:
-            logger.warning("forward_to_peer_failed", target=fingerprint, error=str(exc))
-            return False
+        if self._redis_store is not None:
+            try:
+                receivers = await self._redis_store.publish(f"bv:peer:{fingerprint}", serialized)
+                return receivers > 0
+            except Exception as exc:
+                logger.warning("pubsub_publish_failed", target=fingerprint, error=str(exc))
+                return False
+
+        return False
 
 
 async def receive_control_frame(ws: WebSocket) -> dict[str, Any]:

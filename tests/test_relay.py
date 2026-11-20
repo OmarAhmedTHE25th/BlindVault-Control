@@ -280,3 +280,74 @@ async def test_relay_session_detach_peer_unit() -> None:
     await session.detach_peer("responder")
     assert session.ws_responder is None
     assert not session.ready_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_cross_replica_relay_bridge_via_redis_pubsub(
+    two_live_servers: tuple[tuple[str, int], tuple[str, int]],
+    ec_p256_keypair: tuple[Any, Any, str, str],
+    second_ec_p256_keypair: tuple[Any, Any, str, str],
+) -> None:
+    """Verify binary relay works when Peer A attaches to Replica 1 and Peer B to Replica 2."""
+    (ws_url_1, _), (ws_url_2, _) = two_live_servers
+
+    async with (
+        websockets.connect(f"{ws_url_1}/ws/control") as ws_a,
+        websockets.connect(f"{ws_url_2}/ws/control") as ws_b,
+    ):
+        fp_a = await do_ws_auth(ws_a, ec_p256_keypair)
+        fp_b = await do_ws_auth(ws_b, second_ec_p256_keypair)
+
+        await ws_a.send(json.dumps({"type": "CREATE_RELAY", "target_fingerprint": fp_b}))
+        created = json.loads(await ws_a.recv())
+        invite = json.loads(await ws_b.recv())
+        assert created["type"] == "RELAY_CREATED"
+        assert invite["type"] == "RELAY_INVITE"
+        assert invite["from_fingerprint"] == fp_a
+
+        session_id = created["session_id"]
+        token_a = created["token"]
+        token_b = invite["token"]
+
+    # Peer A connects to Replica 1; Peer B connects to Replica 2
+    total_bytes = 1024 * 1024  # 1 MiB across replicas
+    chunk_size = 64 * 1024
+    num_chunks = total_bytes // chunk_size
+    chunks = [secrets.token_bytes(chunk_size) for _ in range(num_chunks)]
+    expected_sha = hashlib.sha256(b"".join(chunks)).hexdigest()
+
+    async with (
+        websockets.connect(
+            f"{ws_url_1}/ws/relay/{session_id}",
+            additional_headers={"Authorization": f"Bearer {token_a}"},
+            max_size=131072,
+        ) as relay_a,
+        websockets.connect(
+            f"{ws_url_2}/ws/relay/{session_id}",
+            additional_headers={"Authorization": f"Bearer {token_b}"},
+            max_size=131072,
+        ) as relay_b,
+    ):
+        recv_chunks_a2b: list[bytes] = []
+        recv_len_a2b = 0
+
+        async def rx_b() -> None:
+            nonlocal recv_len_a2b
+            while recv_len_a2b < total_bytes:
+                frame = await relay_b.recv()
+                assert isinstance(frame, bytes)
+                recv_chunks_a2b.append(frame)
+                recv_len_a2b += len(frame)
+
+        rx_task = asyncio.create_task(rx_b())
+        for chunk in chunks:
+            await relay_a.send(chunk)
+
+        await asyncio.wait_for(rx_task, timeout=10.0)
+        assert hashlib.sha256(b"".join(recv_chunks_a2b)).hexdigest() == expected_sha
+
+        # Also verify bidirectional reverse direction (Replica 2 -> Replica 1)
+        ack_payload = b"REVERSE_ACK_OK_" + secrets.token_bytes(32)
+        await relay_b.send(ack_payload)
+        got_ack = await asyncio.wait_for(relay_a.recv(), timeout=5.0)
+        assert got_ack == ack_payload

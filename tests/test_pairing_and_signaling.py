@@ -240,3 +240,84 @@ async def test_claim_invite_invalid_crockford_code(
         msg = json.loads(await ws.recv())
         assert msg["type"] == "ERROR"
         assert msg["code"] == "INVALID_INVITE_CODE"
+
+
+@pytest.mark.asyncio
+async def test_cross_replica_pairing_and_signaling_via_redis_pubsub(
+    two_live_servers: tuple[tuple[str, int], tuple[str, int]],
+    ec_p256_keypair: tuple[Any, Any, str, str],
+    second_ec_p256_keypair: tuple[Any, Any, str, str],
+) -> None:
+    """Verify two peers on separate control replicas pair and signal via Redis Pub/Sub."""
+    (ws_url_1, _), (ws_url_2, _) = two_live_servers
+
+    async with (
+        websockets.connect(f"{ws_url_1}/ws/control") as ws_a,
+        websockets.connect(f"{ws_url_2}/ws/control") as ws_b,
+    ):
+        fp_a = await do_ws_auth(ws_a, ec_p256_keypair)
+        fp_b = await do_ws_auth(ws_b, second_ec_p256_keypair)
+
+        # Peer A on Replica 1 creates an invite
+        await ws_a.send(
+            json.dumps(
+                {
+                    "type": "CREATE_INVITE",
+                    "endpoints": [{"ip": "198.51.100.10", "port": 7001}],
+                }
+            )
+        )
+        inv = json.loads(await ws_a.recv())
+        assert inv["type"] == "INVITE_CREATED"
+
+        # Peer B on Replica 2 claims the invite
+        await ws_b.send(
+            json.dumps(
+                {
+                    "type": "CLAIM_INVITE",
+                    "code": inv["code"],
+                    "endpoints": [{"ip": "203.0.113.20", "port": 7002}],
+                }
+            )
+        )
+
+        matched_b = json.loads(await ws_b.recv())
+        matched_a = json.loads(await ws_a.recv())
+        assert matched_b["type"] == "PEER_MATCHED"
+        assert matched_b["peer_fingerprint"] == fp_a
+        assert matched_b["endpoints"] == [{"ip": "198.51.100.10", "port": 7001}]
+
+        assert matched_a["type"] == "PEER_MATCHED"
+        assert matched_a["peer_fingerprint"] == fp_b
+        assert matched_a["endpoints"] == [{"ip": "203.0.113.20", "port": 7002}]
+
+        # Cross-replica SIGNAL_OFFER (A on Replica 1 -> B on Replica 2)
+        await ws_a.send(
+            json.dumps(
+                {
+                    "type": "SIGNAL_OFFER",
+                    "target_fingerprint": fp_b,
+                    "session_id": "cross_replica_sess",
+                    "candidate": {"ip": "198.51.100.10", "port": 7001},
+                }
+            )
+        )
+        offer_b = json.loads(await ws_b.recv())
+        assert offer_b["type"] == "SIGNAL_OFFER"
+        assert offer_b["from_fingerprint"] == fp_a
+        assert offer_b["session_id"] == "cross_replica_sess"
+
+        # Cross-replica SIGNAL_ANSWER (B on Replica 2 -> A on Replica 1)
+        await ws_b.send(
+            json.dumps(
+                {
+                    "type": "SIGNAL_ANSWER",
+                    "target_fingerprint": fp_a,
+                    "session_id": "cross_replica_sess",
+                    "candidate": {"ip": "203.0.113.20", "port": 7002},
+                }
+            )
+        )
+        answer_a = json.loads(await ws_a.recv())
+        assert answer_a["type"] == "SIGNAL_ANSWER"
+        assert answer_a["from_fingerprint"] == fp_b

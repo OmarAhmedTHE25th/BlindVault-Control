@@ -1,8 +1,11 @@
-"""Bounded zero-knowledge encrypted WebSocket fallback relay with backpressure."""
+"""Bounded zero-knowledge encrypted WebSocket fallback relay with Redis Pub/Sub bridging."""
 
 import asyncio
+import base64
 import contextlib
+import secrets
 import time
+from typing import Any
 
 import structlog
 from fastapi import WebSocket, WebSocketDisconnect
@@ -66,7 +69,7 @@ class RelaySession:
             self.ready_event.clear()
 
     def start_bridge_if_ready(self, relay_manager: "RelayManager") -> bool:
-        """Launch dedicated bridge task once both peers are attached."""
+        """Launch dedicated bridge task once both peers are attached locally."""
         if (
             not self._bridge_started
             and self.ws_initiator is not None
@@ -78,7 +81,7 @@ class RelaySession:
         return False
 
     async def _run_bridge(self, relay_manager: "RelayManager") -> None:
-        """Execute bidirectional stream piping between attached peers."""
+        """Execute bidirectional stream piping between locally attached peers."""
         ws_a = self.ws_initiator
         ws_b = self.ws_responder
         if not ws_a or not ws_b:
@@ -89,7 +92,6 @@ class RelaySession:
         pipe_b = asyncio.create_task(pipe_stream(ws_b, ws_a, direction="responder_to_initiator"))
 
         try:
-            # Enforce maximum session duration (default 15 minutes)
             done, pending = await asyncio.wait(
                 [pipe_a, pipe_b],
                 timeout=float(settings.RELAY_MAX_SESSION_SECONDS),
@@ -97,10 +99,9 @@ class RelaySession:
             )
             for task in pending:
                 task.cancel()
-                await asyncio.gather(*pending, return_exceptions=True)
+            await asyncio.gather(*pending, return_exceptions=True)
         finally:
             self.closed_event.set()
-            # Clean teardown of both sides
             for ws in (ws_a, ws_b):
                 with contextlib.suppress(Exception):
                     await ws.close(code=1000, reason="Relay session finished")
@@ -109,10 +110,11 @@ class RelaySession:
 
 
 class RelayManager:
-    """In-memory coordinator for live zero-knowledge relay sessions."""
+    """In-memory and Redis-coordinated manager for zero-knowledge relay sessions."""
 
     def __init__(self, redis_store: RedisStore) -> None:
         self.redis_store = redis_store
+        self.instance_id = secrets.token_hex(8)
         self.sessions: dict[str, RelaySession] = {}
         self._lock = asyncio.Lock()
 
@@ -197,6 +199,7 @@ class RelayManager:
             session.closed_event.set()
 
         await self.redis_store.delete_relay_session(session_id)
+        await self.redis_store.client.delete(f"relay_drdy:{session_id}")
 
 
 async def pipe_stream(
@@ -212,7 +215,6 @@ async def pipe_stream(
     """
     try:
         while True:
-            # Enforce 30-second idle timeout between chunks on read side
             raw_msg = await asyncio.wait_for(
                 src.receive(),
                 timeout=float(idle_timeout),
@@ -225,7 +227,6 @@ async def pipe_stream(
             bytes_data: bytes | None = raw_msg.get("bytes")
             text_data: str | None = raw_msg.get("text")
 
-            # Binary-only enforcement (RFC 6455 1003 Unsupported Data)
             if text_data is not None:
                 logger.warning("relay_text_frame_rejected", direction=direction)
                 await src.close(code=1003, reason="Unsupported Data: binary frames only")
@@ -236,7 +237,6 @@ async def pipe_stream(
                     logger.warning("relay_frame_too_large", size=len(bytes_data))
                     await src.close(code=1009, reason="Frame exceeds 64 KiB")
                     break
-                # Backpressure: wait for destination buffer with write timeout
                 await asyncio.wait_for(
                     dst.send_bytes(bytes_data),
                     timeout=float(idle_timeout),
@@ -248,6 +248,134 @@ async def pipe_stream(
         logger.debug("relay_peer_disconnected", direction=direction)
     except Exception as exc:
         logger.debug("relay_pipe_error", direction=direction, error=str(exc))
+
+
+async def bridge_via_redis_pubsub(
+    websocket: WebSocket,
+    session_id: str,
+    role: str,
+    relay_manager: RelayManager,
+    ctrl_pubsub: Any,
+    ctrl_channel: str,
+    idle_timeout: int = settings.RELAY_IDLE_TIMEOUT_SECONDS,
+    max_frame_bytes: int = settings.RELAY_MAX_FRAME_BYTES,
+) -> None:
+    """Bridge binary relay frames between two replicas over Redis Pub/Sub."""
+    other_role = "responder" if role == "initiator" else "initiator"
+    in_chan = f"bv:relay:{session_id}:b2a" if role == "initiator" else f"bv:relay:{session_id}:a2b"
+    out_chan = f"bv:relay:{session_id}:a2b" if role == "initiator" else f"bv:relay:{session_id}:b2a"
+
+    data_pubsub = relay_manager.redis_store.create_pubsub()
+    await data_pubsub.subscribe(in_chan)
+
+    try:
+        # Synchronize readiness so neither replica publishes frames before the other subscribes
+        drdy_key = f"relay_drdy:{session_id}"
+        await relay_manager.redis_store.client.hset(drdy_key, role, "1")
+        await relay_manager.redis_store.client.expire(drdy_key, settings.RELAY_MAX_SESSION_SECONDS)
+        await relay_manager.redis_store.publish(ctrl_channel, f"DRDY:{role}")
+
+        deadline = time.monotonic() + float(settings.RELAY_TOKEN_TTL_SECONDS)
+        while time.monotonic() < deadline:
+            flag = await relay_manager.redis_store.client.hget(drdy_key, other_role)
+            if flag == "1":
+                break
+            msg = await ctrl_pubsub.get_message(ignore_subscribe_messages=True, timeout=0.05)
+            if msg and msg.get("type") == "message":
+                payload = str(msg.get("data", ""))
+                if payload == f"DRDY:{other_role}":
+                    break
+                if payload == "ABORT":
+                    return
+
+        with contextlib.suppress(Exception):
+            await ctrl_pubsub.unsubscribe(ctrl_channel)
+            await ctrl_pubsub.aclose()
+
+        async def ws_to_redis() -> None:
+            try:
+                while True:
+                    raw_msg = await asyncio.wait_for(
+                        websocket.receive(),
+                        timeout=float(idle_timeout),
+                    )
+                    if raw_msg.get("type") == "websocket.disconnect":
+                        break
+                    text_data: str | None = raw_msg.get("text")
+                    if text_data is not None:
+                        logger.warning("relay_text_frame_rejected", direction=f"{role}_to_pubsub")
+                        await websocket.close(
+                            code=1003,
+                            reason="Unsupported Data: binary frames only",
+                        )
+                        break
+                    bytes_data: bytes | None = raw_msg.get("bytes")
+                    if bytes_data is not None:
+                        if len(bytes_data) > max_frame_bytes:
+                            await websocket.close(code=1009, reason="Frame exceeds 64 KiB")
+                            break
+                        encoded = "D:" + base64.b64encode(bytes_data).decode("ascii")
+                        await relay_manager.redis_store.publish(out_chan, encoded)
+            except (TimeoutError, WebSocketDisconnect, ConnectionResetError):
+                pass
+            except Exception as exc:
+                logger.debug("relay_pubsub_tx_error", role=role, error=str(exc))
+            finally:
+                with contextlib.suppress(Exception):
+                    await relay_manager.redis_store.publish(out_chan, "C")
+
+        async def redis_to_ws() -> None:
+            last_activity = time.monotonic()
+            try:
+                while True:
+                    msg = await data_pubsub.get_message(
+                        ignore_subscribe_messages=True,
+                        timeout=0.05,
+                    )
+                    if msg is None:
+                        if (time.monotonic() - last_activity) > float(idle_timeout):
+                            break
+                        continue
+                    if msg.get("type") != "message":
+                        continue
+                    raw_data = msg.get("data")
+                    text = (
+                        raw_data.decode("utf-8") if isinstance(raw_data, bytes) else str(raw_data)
+                    )
+                    if text == "C":
+                        break
+                    if text.startswith("D:"):
+                        last_activity = time.monotonic()
+                        chunk = base64.b64decode(text[2:])
+                        await asyncio.wait_for(
+                            websocket.send_bytes(chunk),
+                            timeout=float(idle_timeout),
+                        )
+            except (TimeoutError, WebSocketDisconnect, ConnectionResetError):
+                pass
+            except Exception as exc:
+                logger.debug("relay_pubsub_rx_error", role=role, error=str(exc))
+
+        tx_task = asyncio.create_task(ws_to_redis())
+        rx_task = asyncio.create_task(redis_to_ws())
+
+        done, pending = await asyncio.wait(
+            [tx_task, rx_task],
+            timeout=float(settings.RELAY_MAX_SESSION_SECONDS),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for t in pending:
+            t.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    finally:
+        with contextlib.suppress(Exception):
+            await data_pubsub.unsubscribe(in_chan)
+            await data_pubsub.aclose()
+        with contextlib.suppress(Exception):
+            await websocket.close(code=1000, reason="Relay session finished")
+        await relay_manager.cleanup_session(session_id)
+        logger.info("relay_pubsub_session_terminated", session_id=session_id, role=role)
 
 
 async def handle_relay_connection(
@@ -272,13 +400,43 @@ async def handle_relay_connection(
     try:
         await websocket.accept()
         role = await session.attach_peer(websocket, token)
-        logger.debug("relay_peer_attached", session_id=session_id, role=role)
     except Exception as exc:
         logger.warning("relay_attach_rejected", error=str(exc))
         await websocket.close(code=1008, reason="Invalid relay token")
         return
 
-    # Wait for the counterpart peer to connect, or for early disconnect
+    other_role = "responder" if role == "initiator" else "initiator"
+    ctrl_channel = f"bv:relay:{session_id}:ctrl"
+    ctrl_pubsub = relay_manager.redis_store.create_pubsub()
+    await ctrl_pubsub.subscribe(ctrl_channel)
+
+    claimed = await relay_manager.redis_store.claim_relay_slot(
+        session_id=session_id,
+        role=role,
+        instance_id=relay_manager.instance_id,
+        ttl_seconds=settings.RELAY_MAX_SESSION_SECONDS,
+    )
+    if not claimed:
+        await session.detach_peer(role)
+        with contextlib.suppress(Exception):
+            await ctrl_pubsub.unsubscribe(ctrl_channel)
+            await ctrl_pubsub.aclose()
+        await websocket.close(code=1008, reason="Relay slot already attached elsewhere")
+        return
+
+    logger.debug(
+        "relay_peer_attached",
+        session_id=session_id,
+        role=role,
+        instance=relay_manager.instance_id,
+    )
+    await relay_manager.redis_store.publish(
+        ctrl_channel, f"JOIN:{role}:{relay_manager.instance_id}"
+    )
+
+    other_instance: str | None = None
+    aborted = False
+
     async def wait_for_disconnect() -> None:
         try:
             while True:
@@ -288,32 +446,80 @@ async def handle_relay_connection(
         except (WebSocketDisconnect, ConnectionResetError):
             pass
 
+    async def wait_ctrl_join() -> str | None:
+        while True:
+            slots = await relay_manager.redis_store.get_relay_slots(session_id)
+            if other_role in slots:
+                return slots[other_role]
+            msg = await ctrl_pubsub.get_message(ignore_subscribe_messages=True, timeout=0.05)
+            if msg and msg.get("type") == "message":
+                payload = str(msg.get("data", ""))
+                if payload == "ABORT":
+                    return "__ABORT__"
+                prefix = f"JOIN:{other_role}:"
+                if payload.startswith(prefix):
+                    return payload.removeprefix(prefix)
+
     disconnect_task = asyncio.create_task(wait_for_disconnect())
-    ready_task = asyncio.create_task(session.ready_event.wait())
+    ctrl_task = asyncio.create_task(wait_ctrl_join())
 
     try:
         done, pending = await asyncio.wait(
-            [ready_task, disconnect_task],
+            [ctrl_task, disconnect_task],
             timeout=float(settings.RELAY_TOKEN_TTL_SECONDS),
             return_when=asyncio.FIRST_COMPLETED,
         )
         for t in pending:
             t.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
 
-        if disconnect_task in done:
-            raise WebSocketDisconnect()
-        if ready_task not in done:
-            raise TimeoutError()
-    except (TimeoutError, WebSocketDisconnect, Exception):
+        if disconnect_task in done or ctrl_task not in done:
+            aborted = True
+        else:
+            res = ctrl_task.result()
+            if res is None or res == "__ABORT__":
+                aborted = True
+            else:
+                other_instance = res
+    except Exception:
+        aborted = True
+
+    if aborted or other_instance is None:
         logger.info("relay_rendezvous_aborted", session_id=session_id, role=role)
+        await relay_manager.redis_store.publish(ctrl_channel, "ABORT")
+        with contextlib.suppress(Exception):
+            await ctrl_pubsub.unsubscribe(ctrl_channel)
+            await ctrl_pubsub.aclose()
         await session.detach_peer(role)
         with contextlib.suppress(Exception):
             await websocket.close(code=1000, reason="Peer failed to join relay session")
         await relay_manager.cleanup_session(session_id)
         return
 
-    # Once both peers are attached, launch dedicated bridge if not already running
-    session.start_bridge_if_ready(relay_manager)
+    if other_instance == relay_manager.instance_id:
+        # Both peers are on this replica -> fast in-memory direct bridge
+        with contextlib.suppress(Exception):
+            await ctrl_pubsub.unsubscribe(ctrl_channel)
+            await ctrl_pubsub.aclose()
+        try:
+            await asyncio.wait_for(session.ready_event.wait(), timeout=2.0)
+        except TimeoutError:
+            await session.detach_peer(role)
+            with contextlib.suppress(Exception):
+                await websocket.close(code=1000, reason="Local peer attachment timeout")
+            await relay_manager.cleanup_session(session_id)
+            return
 
-    # Both peers symmetrically wait for the session bridge to terminate
-    await session.closed_event.wait()
+        session.start_bridge_if_ready(relay_manager)
+        await session.closed_event.wait()
+        return
+
+    # Peers are on different replicas -> cross-replica Redis Pub/Sub bridge
+    await bridge_via_redis_pubsub(
+        websocket=websocket,
+        session_id=session_id,
+        role=role,
+        relay_manager=relay_manager,
+        ctrl_pubsub=ctrl_pubsub,
+        ctrl_channel=ctrl_channel,
+    )

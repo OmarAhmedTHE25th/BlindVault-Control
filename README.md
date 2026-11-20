@@ -28,7 +28,7 @@ A production-grade, zero-knowledge control plane, NAT-traversal signaling server
                       |   +-------------------------------+   |
                       |   |    UDP Reflector (Port 3478)  |   |
                       |   |  - STUN-like Endpoint Mapping |   |
-                      |   |  - HMAC-SHA256 Tamper Proof   |   |
+                      |   |  - Ed25519 Signed Responses   |   |
                       |   +-------------------------------+   |
                       |                                       |
                       |   +-------------------------------+   |
@@ -71,31 +71,33 @@ A production-grade, zero-knowledge control plane, NAT-traversal signaling server
 
 ### 3. UDP Endpoint Reflector (`udp_reflector.py`)
 - Async UDP server listening on port `3478` (`asyncio.DatagramProtocol`).
-- Peer sends a 20-byte probe: `Magic (4B: 0x42564C54) + Client Nonce (16B)`.
+- Peer fetches the reflector's public Ed25519 key from `GET /api/v1/info` (`udp_reflector_public_key`, base64 raw 32B key).
+- Peer sends a 20-byte probe: `Magic (4B: b"BVST", 0x42565354) + Client Nonce (16B)`.
 - Server reflects back:
   ```
-  [0:4]   Magic (0x42564C54)
-  [4:20]  Client Nonce (16B)
-  [20]    Address Family (0x01=IPv4, 0x02=IPv6)
-  [21:25] (or [21:37]) Observed IP bytes
-  [Port]  Observed Port (2B big-endian)
-  [Time]  Server Epoch Timestamp (8B big-endian)
-  [HMAC]  HMAC-SHA256 Authentication Tag (32B)
+  [0:4]        Magic (0x42565354 / b"BVST")
+  [4:20]       Client Nonce (16B)
+  [20]         Address Family (1B uint8: 4=IPv4, 6=IPv6)
+  [21:21+L]    Observed IP bytes (L=4 for IPv4, L=16 for IPv6)
+  [21+L:23+L]  Observed Port (2B uint16 big-endian)
+  [23+L:31+L]  Server Epoch Timestamp (8B uint64 big-endian)
+  [31+L:95+L]  Ed25519 Signature (64B) over [0:31+L]
   ```
-- Peers use the HMAC tag to ensure external NAT mappings are authentic and not spoofed.
+- Peers asymmetrically verify the Ed25519 signature using `udp_reflector_public_key` without possessing any server secret.
 
-### 4. Direct Hole-Punch Signaling (`signaling.py`)
+### 4. Direct Hole-Punch Signaling & Horizontal Scaling (`signaling.py`)
 - Matched peers exchange direct connection candidates over the WebSocket control channel:
   - `SIGNAL_OFFER`: Session description / ICE candidates
   - `SIGNAL_ANSWER`: Responsive session description / ICE candidates
   - `HOLE_PUNCH_SYNC`: Coordinated timestamp sync for synchronized UDP/TCP hole punching
+- **Horizontal Scaling via Redis Pub/Sub:** Each replica subscribes to `bv:peer:{fingerprint}` for locally connected peers and publishes cross-replica signaling (`PEER_MATCHED`, `SIGNAL_*`, `HOLE_PUNCH_SYNC`, `RELAY_INVITE`) over Redis Pub/Sub.
 
 ### 5. Encrypted Fallback Relay (`relay.py`)
 - When NAT traversal or direct hole-punching fails, peers fall back to the relay:
   - Peer requests `CREATE_RELAY` for a target peer fingerprint.
-  - Server issues a single-use `relay_token` (30s TTL) strictly bound to `(initiator, responder)` and notifies the responder via `RELAY_INVITE`.
-  - Both peers connect to `WS /ws/relay/{session_id}?token=...`.
-  - Once both sides attach, the relay establishes two bidirectional non-blocking pipes (`pipe_a_to_b`, `pipe_b_to_a`).
+  - Server issues a single-use `token` (30s TTL) strictly bound to `(initiator, responder)` and notifies the responder via `RELAY_INVITE`.
+  - Both peers connect to `WS /ws/relay/{session_id}` (passing `Authorization: Bearer <token>`).
+  - If both peers land on the same replica, an in-memory bidirectional pipe bridges them; if they land on different replicas behind a load balancer, binary frames are bridged seamlessly across replicas over Redis Pub/Sub (`bv:relay:{session_id}:a2b` and `b2a`).
   - Strict 64 KiB frame limit, backpressure via `await websocket.send_bytes(...)`, 15-minute maximum session lifetime, and 30-second idle timeout.
   - Sockets and Redis state are immediately cleaned up upon disconnect or error.
   - Zero inspection of payload bytes: peer streams are opaque ciphertext carrying BlindVault's end-to-end mTLS 1.3 session.
@@ -155,7 +157,7 @@ Settings can be overridden via environment variables or a `.env` file (prefixed 
 | `BLINDVAULT_ALLOWED_ORIGINS` | `[]` | Allowed WebSocket Origin headers (empty rejects browser origins) |
 | `BLINDVAULT_UDP_HOST` | `0.0.0.0` | UDP STUN reflector bind address |
 | `BLINDVAULT_UDP_PORT` | `3478` | UDP STUN reflector bind port |
-| `BLINDVAULT_UDP_SECRET` | *(auto-generated)* | 32-byte secret key for reflector HMAC verification (warns if auto-generated) |
+| `BLINDVAULT_UDP_SIGNING_PRIVATE_KEY` | *(auto-generated)* | Ed25519 private key (PEM, 64-hex seed, or base64 raw 32B) for reflector signatures |
 | `BLINDVAULT_REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL |
 | `BLINDVAULT_RATE_LIMIT_HANDSHAKE_PER_MIN` | `10` | Max handshakes per minute per IP |
 | `BLINDVAULT_RATE_LIMIT_INVITE_PER_MIN` | `10` | Max invites per minute per fingerprint |
@@ -220,14 +222,14 @@ The test suite utilizes `fakeredis[lua]` to execute deterministic, hermetic test
 pytest -v
 ```
 
-### Test Coverage (29/29 Passing)
+### Test Coverage (41/41 Passing)
 
 - **`test_crypto.py`** (11 tests): EC P-256 parsing (PEM and DER), curve verification (`SECP256R1`), rejection of rogue curves (`secp256k1`, `secp384r1`, RSA, garbage), SHA-256 fingerprinting, nonce generation, base64 encoding/decoding, ECDSA signature verification, Crockford Base32 generation and validation.
-- **`test_auth_and_presence.py`** (4 tests): Full challenge-response handshake, periodic PING/PONG heartbeats, invalid signature rejection, nonce replay prevention (single-use check), oversized frame rejection (`1009`).
-- **`test_pairing_and_signaling.py`** (4 tests): Ephemeral invite creation, mutual claim and `PEER_MATCHED` notification, self-pairing rejection, P2P signaling routing (`SIGNAL_OFFER`, `SIGNAL_ANSWER`, `HOLE_PUNCH_SYNC`), offline peer error handling.
-- **`test_udp_reflector.py`** (4 tests): Binary packet encoding/decoding for IPv4 and IPv6, HMAC-SHA256 signature calculation, tamper detection, live UDP socket reflection.
-- **`test_relay.py`** (2 tests): End-to-end 10 MiB binary stream transfer with SHA-256 hash verification across dual asynchronous backpressure pipes, oversized relay frame rejection.
-- **`test_rate_limiter.py`** (4 tests): IP handshake rate limiting, fingerprint invite rate limiting, relay session rate limiting, token-bucket replenishment over time.
+- **`test_auth_and_presence.py`** (7 tests): Full challenge-response handshake, periodic PING/PONG heartbeats, invalid signature rejection, nonce replay prevention, oversized frame rejection (`1009`), `/ready` probe, Origin validation, IPv4/IPv6 log scrubbing.
+- **`test_pairing_and_signaling.py`** (6 tests): Ephemeral invite creation, mutual claim (`PEER_MATCHED`) with zero server IP leak, invalid Crockford code handling, self-pairing rejection, P2P signaling routing, cross-replica pairing & signaling over Redis Pub/Sub.
+- **`test_udp_reflector.py`** (6 tests): Ed25519 key loading, binary packet encoding/decoding for IPv4 and IPv6, Ed25519 signature verification, tamper detection, live UDP socket reflection, `/api/v1/info` public key exposure.
+- **`test_relay.py`** (6 tests): End-to-end 10 MiB binary stream transfer with SHA-256 verification, oversized frame rejection, text frame rejection (`1003`), early disconnect detach & teardown, unit lifecycle, cross-replica Redis Pub/Sub relay bridge.
+- **`test_rate_limiter.py`** (5 tests): IP handshake, invite creation, invite claim, relay creation rate limiting, and simulated-clock token-bucket refill.
 
 ---
 

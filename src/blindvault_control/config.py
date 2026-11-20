@@ -26,10 +26,10 @@ class Settings(BaseSettings):
     # Origin validation for WebSockets (empty list rejects browser origins; ["*"] allows all)
     ALLOWED_ORIGINS: list[str] = Field(default_factory=list)
 
-    # UDP STUN-like Endpoint Reflector
+    # UDP STUN-like Endpoint Reflector (Ed25519 private key: PEM, 64-hex seed, or base64 raw 32B)
     UDP_HOST: str = "0.0.0.0"
     UDP_PORT: int = 3478
-    UDP_SECRET: str = ""
+    UDP_SIGNING_PRIVATE_KEY: str = ""
 
     # Redis backend
     REDIS_URL: str = "redis://localhost:6379/0"

@@ -159,6 +159,42 @@ class RedisStore:
             return None
 
     async def delete_relay_session(self, session_id: str) -> None:
-        """Clean up relay session state upon completion or disconnect."""
-        key = f"relay:{session_id}"
-        await self._client.delete(key)
+        """Clean up relay session state and slot claims upon completion or disconnect."""
+        await self._client.delete(f"relay:{session_id}", f"relay_attach:{session_id}")
+
+    # ---------- Horizontal Scaling (Pub/Sub & Distributed Relay Slots) ----------
+
+    async def publish(self, channel: str, message: str) -> int:
+        """Publish a message onto a Redis Pub/Sub channel."""
+        res = await self._client.publish(channel, message)
+        return int(res)
+
+    def create_pubsub(self) -> Any:
+        """Create a dedicated Pub/Sub subscriber handle."""
+        return self._client.pubsub()
+
+    async def claim_relay_slot(
+        self,
+        session_id: str,
+        role: str,
+        instance_id: str,
+        ttl_seconds: int,
+    ) -> bool:
+        """Atomically claim a relay session role slot for an instance using HSETNX."""
+        key = f"relay_attach:{session_id}"
+        claimed = await self._client.hsetnx(key, role, instance_id)
+        if claimed:
+            await self._client.expire(key, ttl_seconds)
+            return True
+        return False
+
+    async def get_relay_slots(self, session_id: str) -> dict[str, str]:
+        """Fetch attached instance IDs per role for a relay session."""
+        key = f"relay_attach:{session_id}"
+        raw = await self._client.hgetall(key)
+        return {str(k): str(v) for k, v in raw.items()}
+
+    async def release_relay_slot(self, session_id: str, role: str) -> None:
+        """Release a claimed relay role slot on early abort."""
+        key = f"relay_attach:{session_id}"
+        await self._client.hdel(key, role)
