@@ -1,8 +1,8 @@
 """Configuration management using Pydantic Settings."""
 
-import secrets
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,14 +16,20 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # Environment
+    ENVIRONMENT: Literal["development", "test", "production"] = "development"
+
     # Server binding
     HOST: str = "0.0.0.0"
     PORT: int = 8000
 
+    # Origin validation for WebSockets (empty list rejects browser origins; ["*"] allows all)
+    ALLOWED_ORIGINS: list[str] = Field(default_factory=list)
+
     # UDP STUN-like Endpoint Reflector
     UDP_HOST: str = "0.0.0.0"
     UDP_PORT: int = 3478
-    UDP_SECRET: str = secrets.token_hex(32)
+    UDP_SECRET: str = ""
 
     # Redis backend
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -31,6 +37,7 @@ class Settings(BaseSettings):
     # Rate limits (events per minute)
     RATE_LIMIT_HANDSHAKE_PER_MIN: int = 10
     RATE_LIMIT_INVITE_PER_MIN: int = 10
+    RATE_LIMIT_CLAIM_PER_MIN: int = 10
     RATE_LIMIT_RELAY_PER_MIN: int = 5
 
     # Relay boundaries

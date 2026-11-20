@@ -47,6 +47,7 @@ async def start_benchmark_server(
     app.state.rate_limiter = test_rate_limiter
     test_rate_limiter.check_handshake = lambda _ip: asyncio.sleep(0, result=True)  # type: ignore[assignment]
     test_rate_limiter.check_invite = lambda _fp: asyncio.sleep(0, result=True)  # type: ignore[assignment]
+    test_rate_limiter.check_claim = lambda _fp, _ip=None: asyncio.sleep(0, result=True)  # type: ignore[assignment]
     test_rate_limiter.check_relay = lambda _fp: asyncio.sleep(0, result=True)  # type: ignore[assignment]
 
     app.state.signaling_manager = test_signaling

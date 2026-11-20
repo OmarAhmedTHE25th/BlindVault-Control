@@ -215,7 +215,12 @@ async def authenticate_peer(
         ttl_seconds=settings.PRESENCE_TTL_SECONDS,
     )
 
-    await ws.send_text(AuthOkMessage(fingerprint=fingerprint).model_dump_json())
+    await ws.send_text(
+        AuthOkMessage(
+            fingerprint=fingerprint,
+            heartbeat_interval_sec=settings.HEARTBEAT_INTERVAL_SECONDS,
+        ).model_dump_json()
+    )
     return fingerprint, peer_meta
 
 
@@ -228,6 +233,13 @@ async def handle_control_session(
     rate_limiter: RateLimiter,
 ) -> None:
     """Maintain authenticated control session loop."""
+    # Validate Origin header to prevent Cross-Site WebSocket Hijacking (CSWSH)
+    origin = websocket.headers.get("origin")
+    if origin and "*" not in settings.ALLOWED_ORIGINS and origin not in settings.ALLOWED_ORIGINS:
+        logger.warning("origin_not_allowed", origin=origin)
+        await websocket.close(code=1008, reason="Origin not allowed")
+        return
+
     await websocket.accept()
 
     try:
@@ -283,8 +295,28 @@ async def handle_control_session(
                 )
 
             elif msg_type == "CLAIM_INVITE":
+                # Rate limit invite claims per fingerprint and client IP
+                if not await rate_limiter.check_claim(fingerprint, client_ip):
+                    await websocket.send_text(
+                        ErrorMessage(
+                            code="RATE_LIMITED",
+                            message="Claim rate limit exceeded",
+                        ).model_dump_json()
+                    )
+                    continue
+
                 req_claim = ClaimInviteMessage.model_validate(data)
-                clean_code = normalize_crockford_code(req_claim.code)
+                try:
+                    clean_code = normalize_crockford_code(req_claim.code)
+                except ValueError as exc:
+                    await websocket.send_text(
+                        ErrorMessage(
+                            code="INVALID_INVITE_CODE",
+                            message=str(exc),
+                        ).model_dump_json()
+                    )
+                    continue
+
                 invite = await redis_store.consume_invite(clean_code)
 
                 if not invite:
@@ -307,8 +339,9 @@ async def handle_control_session(
                     continue
 
                 creator_endpoints = invite.get("endpoints", [])
-                claimer_presence = await redis_store.get_presence(fingerprint)
-                claimer_endpoints = [claimer_presence] if claimer_presence else []
+                # Zero-knowledge: Send only client-declared endpoints,
+                # never server-observed client_ip
+                claimer_endpoints = req_claim.endpoints
 
                 # Deliver mutual PEER_MATCHED metadata to both peers
                 await signaling_manager.send_to_peer(

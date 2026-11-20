@@ -48,6 +48,7 @@ class ClaimInviteMessage(BaseMessage):
 
     type: Literal["CLAIM_INVITE"] = "CLAIM_INVITE"
     code: str
+    endpoints: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class SignalOfferMessage(BaseMessage):
@@ -100,6 +101,7 @@ class AuthOkMessage(BaseMessage):
 
     type: Literal["AUTH_OK"] = "AUTH_OK"
     fingerprint: str
+    heartbeat_interval_sec: int = Field(default=20)
 
 
 class AuthFailedMessage(BaseMessage):

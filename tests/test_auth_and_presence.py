@@ -3,6 +3,7 @@
 import json
 from typing import Any
 
+import httpx
 import pytest
 import websockets
 from cryptography.hazmat.primitives import hashes
@@ -57,6 +58,7 @@ async def test_successful_auth_and_heartbeat(
         auth_ok_data = json.loads(raw_auth_ok)
         assert auth_ok_data["type"] == "AUTH_OK"
         assert auth_ok_data["fingerprint"] == fp
+        assert auth_ok_data["heartbeat_interval_sec"] == 20
 
         # 5. Verify presence recorded in Redis
         presence = await redis_store.get_presence(fp)
@@ -147,3 +149,48 @@ async def test_oversized_control_frame_rejection(
         with pytest.raises(websockets.exceptions.ConnectionClosed) as exc_info:
             await ws.recv()
         assert exc_info.value.code == 1009
+
+
+@pytest.mark.asyncio
+async def test_readiness_probe(live_server: tuple[str, int]) -> None:
+    _, port = live_server
+    async with httpx.AsyncClient() as client:
+        # Liveness
+        resp_health = await client.get(f"http://127.0.0.1:{port}/health")
+        assert resp_health.status_code == 200
+        assert resp_health.json()["status"] == "healthy"
+
+        # Readiness
+        resp_ready = await client.get(f"http://127.0.0.1:{port}/ready")
+        assert resp_ready.status_code == 200
+        data = resp_ready.json()
+        assert data["status"] == "ready"
+        assert data["redis"] is True
+
+
+@pytest.mark.asyncio
+async def test_origin_validation_rejection(live_server: tuple[str, int]) -> None:
+    base_ws_url, _ = live_server
+    # Connecting with a disallowed browser origin must be rejected with HTTP 403
+    with pytest.raises(websockets.exceptions.InvalidStatus) as exc_info:
+        async with websockets.connect(
+            f"{base_ws_url}/ws/control",
+            additional_headers={"Origin": "https://malicious-site.example.com"},
+        ) as ws:
+            await ws.recv()
+    assert exc_info.value.response.status_code == 403
+
+
+def test_ip_scrubbing_processor_ipv4_and_ipv6() -> None:
+    from blindvault_control.main import ip_scrubbing_processor
+
+    event = {
+        "event": "peer connected from 192.168.1.1 and 2001:0db8:85a3:0000:0000:8a2e:0370:7334",
+        "client_ip": "10.0.0.1",
+        "host": "::1",
+    }
+    scrubbed = ip_scrubbing_processor(None, "info", event)
+    assert "192.168.1.1" not in scrubbed["event"]
+    assert "2001:0db8:85a3" not in scrubbed["event"]
+    assert scrubbed["client_ip"] == "[REDACTED_IP]"
+    assert scrubbed["host"] == "[REDACTED_IP]"

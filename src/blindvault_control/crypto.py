@@ -119,7 +119,18 @@ def generate_crockford_code(length: int = 8) -> str:
 
 
 def normalize_crockford_code(code: str) -> str:
-    """Normalize user-typed Crockford Base32 code (case-insensitive, I/L->1, O->0)."""
-    cleaned = code.strip().upper()
+    """Normalize user-typed Crockford Base32 code (case-insensitive, I/L->1, O->0).
+
+    Validates that the code is exactly 8 characters and only contains
+    Crockford Base32 alphabet characters.
+    Raises ValueError if length != 8 or invalid characters are present.
+    """
+    cleaned = code.strip().upper().replace("-", "").replace(" ", "")
     trans = str.maketrans({"I": "1", "L": "1", "O": "0"})
-    return cleaned.translate(trans)
+    normalized = cleaned.translate(trans)
+    if len(normalized) != 8:
+        raise ValueError(f"Invalid code length: expected 8 characters, got {len(normalized)}")
+    if any(c not in CROCKFORD_ALPHABET for c in normalized):
+        invalid_chars = [c for c in normalized if c not in CROCKFORD_ALPHABET]
+        raise ValueError(f"Invalid Crockford Base32 character(s): {', '.join(invalid_chars)}")
+    return normalized

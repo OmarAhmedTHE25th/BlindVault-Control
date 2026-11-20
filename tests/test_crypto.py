@@ -126,9 +126,22 @@ def test_crockford_base32_code() -> None:
     assert len(code) == 8
     assert all(c in CROCKFORD_ALPHABET for c in code)
 
-    # Normalization tests
-    raw_input = "ab-1L-0o"
+    # Normalization tests with 8 characters (including hyphen stripping and I/L/O transliteration)
+    raw_input = "ab1L-0o23"
     normalized = normalize_crockford_code(raw_input)
-    assert "1" in normalized  # L -> 1
-    assert "0" in normalized  # O -> 0
-    assert normalized.isupper()
+    assert len(normalized) == 8
+    assert normalized == "AB110023"
+
+    # Invalid length rejection
+    with pytest.raises(ValueError, match="Invalid code length"):
+        normalize_crockford_code("short")
+
+    with pytest.raises(ValueError, match="Invalid code length"):
+        normalize_crockford_code("waytoolongstring123")
+
+    # Invalid character rejection (e.g. U is excluded in Crockford Base32, punctuation)
+    with pytest.raises(ValueError, match="Invalid Crockford Base32 character"):
+        normalize_crockford_code("AB12345U")
+
+    with pytest.raises(ValueError, match="Invalid Crockford Base32 character"):
+        normalize_crockford_code("AB12!456")

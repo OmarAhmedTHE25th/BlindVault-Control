@@ -4,8 +4,6 @@ services:
     container_name: blindvault-redis
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "no", "--save", ""]
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -33,7 +31,7 @@ services:
       - "8000:8000/tcp"
       - "3478:3478/udp"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/ready"]
       interval: 10s
       timeout: 5s
       retries: 3

@@ -114,31 +114,32 @@ A production-grade, zero-knowledge control plane, NAT-traversal signaling server
 
 ### Control Channel WebSocket (`/ws/control`)
 
-All control messages are formatted as JSON envelopes: `{"type": "<MESSAGE_TYPE>", ...}`.
+All control messages are formatted as JSON envelopes: `{"type": "<MESSAGE_TYPE>", ...}` strictly matching [schemas.py](file:///z:/home/omar-25th/projects/BlindVault/blindvault-control/src/blindvault_control/schemas.py).
 
 | Direction | Type | Payload Fields | Purpose |
 | :--- | :--- | :--- | :--- |
-| Client → Server | `HELLO` | `public_key_pem`, `observed_endpoint` (optional) | Initiate authentication |
-| Server → Client | `CHALLENGE` | `nonce` (base64, 32 bytes) | Cryptographic challenge |
+| Client → Server | `HELLO` | `public_key`, `observed_endpoint` (optional) | Initiate authentication |
+| Server → Client | `CHALLENGE` | `nonce` (base64, 32 bytes), `fingerprint` | Cryptographic challenge |
 | Client → Server | `AUTH` | `signature` (base64 ECDSA signature) | Complete authentication |
 | Server → Client | `AUTH_OK` | `fingerprint`, `heartbeat_interval_sec` | Session authenticated |
-| Server → Client | `AUTH_ERROR`| `reason` | Auth failure |
+| Server → Client | `AUTH_FAILED`| `reason` | Auth failure |
 | Client ↔ Server | `PING` / `PONG` | *(empty)* | Keepalive / presence refresh |
-| Client → Server | `CREATE_INVITE` | `endpoint_hints` (optional list of strings) | Request Crockford Base32 invite code |
-| Server → Client | `INVITE_CREATED`| `code`, `expires_in_sec` | Invite code issued |
-| Client → Server | `CLAIM_INVITE`  | `code`, `endpoint_hints` (optional) | Redeem invite code |
-| Server → Client | `PEER_MATCHED`  | `peer_fingerprint`, `endpoint_hints` | Mutual peer match notifications |
-| Client ↔ Client | `SIGNAL_OFFER`  | `target_fingerprint`, `payload` | Forward ICE/P2P offer |
-| Client ↔ Client | `SIGNAL_ANSWER` | `target_fingerprint`, `payload` | Forward ICE/P2P answer |
-| Client ↔ Client | `HOLE_PUNCH_SYNC`| `target_fingerprint`, `sync_stage`, `scheduled_at` | Synchronized hole-punch timing |
+| Client → Server | `CREATE_INVITE` | `endpoints` (optional list of endpoint dicts) | Request Crockford Base32 invite code |
+| Server → Client | `INVITE_CREATED`| `code`, `ttl` | Invite code issued |
+| Client → Server | `CLAIM_INVITE`  | `code`, `endpoints` (optional list of endpoint dicts) | Redeem invite code |
+| Server → Client | `PEER_MATCHED`  | `peer_fingerprint`, `endpoints`, `role` (`creator` \| `claimer`) | Mutual peer match notifications |
+| Client ↔ Client | `SIGNAL_OFFER`  | `target_fingerprint`, `session_id`, `candidate` | Forward ICE/P2P offer |
+| Client ↔ Client | `SIGNAL_ANSWER` | `target_fingerprint`, `session_id`, `candidate` | Forward ICE/P2P answer |
+| Client ↔ Client | `HOLE_PUNCH_SYNC`| `target_fingerprint`, `stage`, `timestamp` (optional) | Synchronized hole-punch timing |
 | Client → Server | `CREATE_RELAY`  | `target_fingerprint` | Request fallback relay session |
-| Server → Client | `RELAY_CREATED` | `session_id`, `relay_token`, `relay_ws_url` | Initiator relay parameters |
-| Server → Client | `RELAY_INVITE`  | `session_id`, `relay_token`, `relay_ws_url`, `initiator_fingerprint` | Target peer relay invite |
-| Server → Client | `ERROR`         | `message`, `code` | Operation error notice |
+| Server → Client | `RELAY_CREATED` | `session_id`, `token` | Initiator relay rendezvous details |
+| Server → Client | `RELAY_INVITE`  | `session_id`, `from_fingerprint`, `token` | Target peer relay invite |
+| Server → Client | `ERROR`         | `code`, `message` | Operation error notice |
 
-### Relay WebSocket (`/ws/relay/{session_id}?token=...`)
+### Relay WebSocket (`/ws/relay/{session_id}`)
 
-Binary frames only (max 64 KiB). The server transparently forwards raw bytes between attached peers.
+- **Authentication:** `Authorization: Bearer <token>` or `X-Relay-Token: <token>` HTTP header (or query param `?token=<token>`).
+- **Framing:** Binary frames only (max 64 KiB). Text frames are strictly rejected with WebSocket close code `1003` (Unsupported Data). The server transparently forwards raw bytes between attached peers.
 
 ---
 
@@ -148,14 +149,17 @@ Settings can be overridden via environment variables or a `.env` file (prefixed 
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
+| `BLINDVAULT_ENVIRONMENT` | `development` | Runtime environment (`development`, `test`, `production`) |
 | `BLINDVAULT_HOST` | `0.0.0.0` | HTTP/WebSocket bind address |
 | `BLINDVAULT_PORT` | `8000` | HTTP/WebSocket bind port |
+| `BLINDVAULT_ALLOWED_ORIGINS` | `[]` | Allowed WebSocket Origin headers (empty rejects browser origins) |
 | `BLINDVAULT_UDP_HOST` | `0.0.0.0` | UDP STUN reflector bind address |
 | `BLINDVAULT_UDP_PORT` | `3478` | UDP STUN reflector bind port |
-| `BLINDVAULT_UDP_SECRET` | *random hex* | 32-byte secret key for reflector HMAC verification |
+| `BLINDVAULT_UDP_SECRET` | *(auto-generated)* | 32-byte secret key for reflector HMAC verification (warns if auto-generated) |
 | `BLINDVAULT_REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL |
 | `BLINDVAULT_RATE_LIMIT_HANDSHAKE_PER_MIN` | `10` | Max handshakes per minute per IP |
 | `BLINDVAULT_RATE_LIMIT_INVITE_PER_MIN` | `10` | Max invites per minute per fingerprint |
+| `BLINDVAULT_RATE_LIMIT_CLAIM_PER_MIN` | `10` | Max claims per minute per fingerprint / IP |
 | `BLINDVAULT_RATE_LIMIT_RELAY_PER_MIN` | `5` | Max relays per minute per fingerprint |
 | `BLINDVAULT_RELAY_MAX_SESSION_SECONDS` | `900` | Max relay session lifetime (15 min) |
 | `BLINDVAULT_RELAY_IDLE_TIMEOUT_SECONDS` | `30` | Idle timeout before terminating relay |
@@ -167,7 +171,7 @@ Settings can be overridden via environment variables or a `.env` file (prefixed 
 | `BLINDVAULT_RELAY_TOKEN_TTL_SECONDS` | `30` | Single-use relay token TTL |
 | `BLINDVAULT_HEARTBEAT_INTERVAL_SECONDS` | `20` | Recommended heartbeat interval |
 | `BLINDVAULT_LOG_LEVEL` | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
-| `BLINDVAULT_SCRUB_IPS_IN_LOGS` | `true` | Anonymize IP addresses in structured JSON logs |
+| `BLINDVAULT_SCRUB_IPS_IN_LOGS` | `true` | Anonymize IPv4 & IPv6 addresses in structured JSON logs |
 
 ---
 

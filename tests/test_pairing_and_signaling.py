@@ -56,12 +56,13 @@ async def test_invite_creation_and_mutual_claim(
         code = inv_data["code"]
         assert len(code) == 8
 
-        # 2. Peer B claims the invite code
+        # 2. Peer B claims the invite code with client-declared endpoints
         await ws_b.send(
             json.dumps(
                 {
                     "type": "CLAIM_INVITE",
                     "code": code,
+                    "endpoints": [{"ip": "10.0.0.2", "port": 9002}],
                 }
             )
         )
@@ -75,11 +76,14 @@ async def test_invite_creation_and_mutual_claim(
         assert matched_b["endpoints"] == [{"ip": "1.2.3.4", "port": 9000}]
 
         # 4. Peer A receives PEER_MATCHED (creator role)
+        # Zero-knowledge: strictly Peer B's declared endpoints, never client_ip
         raw_matched_a = await ws_a.recv()
         matched_a = json.loads(raw_matched_a)
         assert matched_a["type"] == "PEER_MATCHED"
         assert matched_a["peer_fingerprint"] == fp_b
         assert matched_a["role"] == "creator"
+        assert matched_a["endpoints"] == [{"ip": "10.0.0.2", "port": 9002}]
+        assert "client_ip" not in json.dumps(matched_a["endpoints"])
 
         # 5. Second claim with same code fails (atomic single-use verification)
         await ws_b.send(
@@ -211,3 +215,28 @@ async def test_signaling_to_offline_peer(
         msg = json.loads(await ws.recv())
         assert msg["type"] == "ERROR"
         assert msg["code"] == "PEER_OFFLINE"
+
+
+@pytest.mark.asyncio
+async def test_claim_invite_invalid_crockford_code(
+    live_server: tuple[str, int],
+    ec_p256_keypair: tuple[Any, Any, str, str],
+) -> None:
+    base_ws_url, _ = live_server
+
+    async with websockets.connect(f"{base_ws_url}/ws/control") as ws:
+        await do_ws_auth(ws, ec_p256_keypair)
+
+        # Send invalid Crockford code (e.g. wrong length)
+        await ws.send(
+            json.dumps(
+                {
+                    "type": "CLAIM_INVITE",
+                    "code": "invalid_code",
+                }
+            )
+        )
+
+        msg = json.loads(await ws.recv())
+        assert msg["type"] == "ERROR"
+        assert msg["code"] == "INVALID_INVITE_CODE"

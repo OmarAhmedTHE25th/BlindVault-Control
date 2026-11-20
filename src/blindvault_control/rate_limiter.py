@@ -1,6 +1,7 @@
 """Atomic Redis Lua-script token-bucket rate limiter."""
 
 import time
+from collections.abc import Callable
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -46,8 +47,13 @@ end
 class RateLimiter:
     """Non-blocking token-bucket rate limiter backed by atomic Redis Lua execution."""
 
-    def __init__(self, client: aioredis.Redis) -> None:
+    def __init__(
+        self,
+        client: aioredis.Redis,
+        time_fn: Callable[[], float] = time.time,
+    ) -> None:
         self._client = client
+        self._time_fn = time_fn
         self._script: Any = None
 
     def _get_script(self) -> Any:
@@ -73,7 +79,7 @@ class RateLimiter:
         """
         capacity = float(limit_per_minute)
         refill_rate = capacity / 60.0
-        now = time.time()
+        now = self._time_fn()
 
         script = self._get_script()
         result = await script(
@@ -92,6 +98,21 @@ class RateLimiter:
         """Rate limit pairing invite creation per peer fingerprint."""
         key = f"ratelimit:invite:{fingerprint}"
         return await self.acquire(key, settings.RATE_LIMIT_INVITE_PER_MIN)
+
+    async def check_claim(self, fingerprint: str, client_ip: str | None = None) -> bool:
+        """Rate limit pairing invite claims per fingerprint and per IP."""
+        key_fp = f"ratelimit:claim:fp:{fingerprint}"
+        allowed_fp = await self.acquire(key_fp, settings.RATE_LIMIT_CLAIM_PER_MIN)
+        if not allowed_fp:
+            return False
+
+        if client_ip:
+            key_ip = f"ratelimit:claim:ip:{client_ip}"
+            allowed_ip = await self.acquire(key_ip, settings.RATE_LIMIT_CLAIM_PER_MIN)
+            if not allowed_ip:
+                return False
+
+        return True
 
     async def check_relay(self, fingerprint: str) -> bool:
         """Rate limit fallback relay session creation per peer fingerprint."""

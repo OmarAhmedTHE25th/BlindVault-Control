@@ -2,6 +2,7 @@
 
 import asyncio
 import re
+import secrets
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -19,8 +20,15 @@ from blindvault_control.relay import RelayManager, handle_relay_connection
 from blindvault_control.signaling import SignalingManager, handle_control_session
 from blindvault_control.udp_reflector import start_udp_reflector
 
-# Regex for IPv4 scrubbing in logs
+# Regexes for IPv4 and IPv6 scrubbing in logs
 IPV4_REGEX = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+IPV6_REGEX = re.compile(
+    r"\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b|"
+    r"\b(?:[0-9a-fA-F]{1,4}:){1,7}:[0-9a-fA-F]{0,4}\b|"
+    r"\b(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){0,4}\b|"
+    r"\b::(?:[0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4}\b|"
+    r"::1\b|::\b"
+)
 
 
 def ip_scrubbing_processor(
@@ -28,15 +36,18 @@ def ip_scrubbing_processor(
     _method_name: str,
     event_dict: dict[str, Any],
 ) -> dict[str, Any]:
-    """Scrub IP addresses from log event dictionaries when SCRUB_IPS_IN_LOGS is active."""
+    """Scrub IPv4 and IPv6 addresses from log event dictionaries when
+    SCRUB_IPS_IN_LOGS is active.
+    """
     if not settings.SCRUB_IPS_IN_LOGS:
         return event_dict
 
     for k, v in list(event_dict.items()):
-        if isinstance(v, str):
-            event_dict[k] = IPV4_REGEX.sub("[REDACTED_IP]", v)
-        elif k in ("client_ip", "host", "peer_ip"):
+        if k in ("client_ip", "host", "peer_ip", "ip"):
             event_dict[k] = "[REDACTED_IP]"
+        elif isinstance(v, str):
+            v_scrubbed = IPV4_REGEX.sub("[REDACTED_IP]", v)
+            event_dict[k] = IPV6_REGEX.sub("[REDACTED_IP]", v_scrubbed)
     return event_dict
 
 
@@ -87,14 +98,31 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         relay_manager = RelayManager(redis_store)
         app.state.relay_manager = relay_manager
 
-    # 2. Start UDP endpoint reflector
+    # 2. Check UDP secret configuration
+    udp_secret = settings.UDP_SECRET
+    if not udp_secret:
+        if settings.ENVIRONMENT == "production":
+            raise RuntimeError(
+                "BLINDVAULT_UDP_SECRET must be explicitly configured in production environment."
+            )
+        udp_secret = secrets.token_hex(32)
+        logger.warning(
+            "udp_secret_auto_generated",
+            reason=(
+                "BLINDVAULT_UDP_SECRET is not configured; ephemeral secret generated. "
+                "Reflections will be invalidated across restarts."
+            ),
+        )
+
+    # 3. Start UDP endpoint reflector
     udp_transport: asyncio.DatagramTransport | None = None
     try:
         udp_transport, _ = await start_udp_reflector(
             host=settings.UDP_HOST,
             port=settings.UDP_PORT,
-            secret=settings.UDP_SECRET,
+            secret=udp_secret,
         )
+        app.state.udp_transport = udp_transport
         logger.info(
             "udp_reflector_listening",
             host=settings.UDP_HOST,
@@ -105,7 +133,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
-    # 3. Teardown
+    # 4. Teardown
     if udp_transport is not None:
         udp_transport.close()
         logger.info("udp_reflector_stopped")
@@ -126,13 +154,47 @@ app = FastAPI(
 
 @app.get("/health", status_code=status.HTTP_200_OK)
 async def health_check() -> JSONResponse:
-    """Zero-knowledge health check returning service status."""
+    """Liveness probe returning basic service operational status."""
     return JSONResponse(
         {
             "status": "healthy",
             "service": "blindvault-control",
             "version": __version__,
         }
+    )
+
+
+@app.get("/ready")
+async def readiness_check() -> JSONResponse:
+    """Readiness probe checking Redis connectivity and UDP reflector."""
+    redis_store: RedisStore | None = getattr(app.state, "redis_store", None)
+    redis_ok = False
+    if redis_store is not None:
+        try:
+            redis_ok = bool(await redis_store.client.ping())
+        except Exception as exc:
+            logger.warning("readiness_redis_check_failed", error=str(exc))
+
+    udp_transport: asyncio.DatagramTransport | None = getattr(app.state, "udp_transport", None)
+    udp_ok = bool(udp_transport is not None and not udp_transport.is_closing())
+
+    if not redis_ok:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "status": "not_ready",
+                "redis": redis_ok,
+                "udp_reflector": udp_ok,
+            },
+        )
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "status": "ready",
+            "redis": redis_ok,
+            "udp_reflector": udp_ok,
+        },
     )
 
 
@@ -174,14 +236,32 @@ async def websocket_control_endpoint(websocket: WebSocket) -> None:
 async def websocket_relay_endpoint(
     websocket: WebSocket,
     session_id: str,
-    token: str = Query(...),
+    token: str | None = Query(None),
 ) -> None:
     """Zero-knowledge encrypted fallback relay bridge for opaque mutual TLS streams."""
+    # Move token to header (Authorization: Bearer ..., X-Relay-Token) or Sec-WebSocket-Protocol
+    effective_token = token
+    auth_header = websocket.headers.get("authorization")
+    if auth_header and auth_header.lower().startswith("bearer "):
+        effective_token = auth_header[7:].strip()
+    elif "x-relay-token" in websocket.headers:
+        effective_token = websocket.headers["x-relay-token"]
+    elif not effective_token and "sec-websocket-protocol" in websocket.headers:
+        subprotocols = [p.strip() for p in websocket.headers["sec-websocket-protocol"].split(",")]
+        for proto in subprotocols:
+            if proto.startswith("token-"):
+                effective_token = proto[6:]
+                break
+
+    if not effective_token:
+        await websocket.close(code=1008, reason="Missing relay token in headers or query")
+        return
+
     relay_manager: RelayManager = app.state.relay_manager
     await handle_relay_connection(
         websocket=websocket,
         session_id=session_id,
-        token=token,
+        token=effective_token,
         relay_manager=relay_manager,
     )
 

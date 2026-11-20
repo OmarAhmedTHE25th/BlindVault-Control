@@ -1,7 +1,7 @@
 """Redis state management for peer presence, challenge nonces, and pairing invites."""
 
 import json
-from typing import Any
+from typing import Any, cast
 
 import redis.asyncio as aioredis
 
@@ -84,7 +84,7 @@ class RedisStore:
         if not val:
             return None
         try:
-            return json.loads(val)  # type: ignore[no-any-return]
+            return cast(dict[str, Any], json.loads(val))
         except Exception:
             return None
 
@@ -119,7 +119,7 @@ class RedisStore:
         if not val:
             return None
         try:
-            return json.loads(val)  # type: ignore[no-any-return]
+            return cast(dict[str, Any], json.loads(val))
         except Exception:
             return None
 
@@ -154,7 +154,7 @@ class RedisStore:
         if not val:
             return None
         try:
-            return json.loads(val)  # type: ignore[no-any-return]
+            return cast(dict[str, Any], json.loads(val))
         except Exception:
             return None
 

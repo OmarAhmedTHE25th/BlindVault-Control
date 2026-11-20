@@ -8,8 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml .
-RUN pip install --no-cache-dir --upgrade pip build && \
-    pip wheel --no-cache-dir --no-deps --wheel-dir /build/wheels -e . || \
+COPY src/ src/
+RUN pip install --no-cache-dir --upgrade pip && \
     pip wheel --no-cache-dir --wheel-dir /build/wheels .
 
 # Final runtime image
@@ -33,11 +33,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN groupadd -g 10001 blindvault && \
     useradd -u 10001 -g blindvault -s /bin/false -m blindvault
 
-# Copy and install package
-COPY pyproject.toml .
-COPY src/ src/
+# Copy and install prebuilt wheels from builder stage
+COPY --from=builder /build/wheels /wheels
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir .
+    pip install --no-cache-dir /wheels/*.whl && \
+    rm -rf /wheels
 
 USER blindvault:blindvault
 
@@ -45,6 +45,6 @@ EXPOSE 8000/tcp
 EXPOSE 3478/udp
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:8000/ready || exit 1
 
 ENTRYPOINT ["blindvault-control"]

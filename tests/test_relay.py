@@ -53,9 +53,10 @@ async def test_end_to_end_relay_transfer_10mib(
         assert invite_data["from_fingerprint"] == fp_a
         token_b = invite_data["token"]
 
-    # 3. Both peers connect to the relay endpoint
-    url_a = f"{base_ws_url}/ws/relay/{session_id}?token={token_a}"
-    url_b = f"{base_ws_url}/ws/relay/{session_id}?token={token_b}"
+    # 3. Both peers connect to the relay endpoint via Authorization: Bearer <token> headers
+    url_relay = f"{base_ws_url}/ws/relay/{session_id}"
+    headers_a = {"Authorization": f"Bearer {token_a}"}
+    headers_b = {"Authorization": f"Bearer {token_b}"}
 
     total_bytes = 10 * 1024 * 1024  # Exactly 10 MiB
     chunk_size = 64 * 1024  # 64 KiB per chunk
@@ -71,8 +72,8 @@ async def test_end_to_end_relay_transfer_10mib(
     expected_hash = hasher_sent.hexdigest()
 
     async with (
-        websockets.connect(url_a, max_size=131072) as relay_a,
-        websockets.connect(url_b, max_size=131072) as relay_b,
+        websockets.connect(url_relay, additional_headers=headers_a, max_size=131072) as relay_a,
+        websockets.connect(url_relay, additional_headers=headers_b, max_size=131072) as relay_b,
     ):
         # Receiver task
         hasher_recv = hashlib.sha256()
@@ -140,3 +141,77 @@ async def test_relay_oversized_frame_rejection(
         with pytest.raises(websockets.exceptions.ConnectionClosed) as exc_info:
             await relay_a.recv()
         assert exc_info.value.code == 1009
+
+
+@pytest.mark.asyncio
+async def test_relay_rejects_text_frames(
+    live_server: tuple[str, int],
+    ec_p256_keypair: tuple[Any, Any, str, str],
+    second_ec_p256_keypair: tuple[Any, Any, str, str],
+) -> None:
+    """Ensure relay rejects text frames with code 1003 (binary-only channel)."""
+    base_ws_url, _ = live_server
+
+    async with (
+        websockets.connect(f"{base_ws_url}/ws/control") as ws_a,
+        websockets.connect(f"{base_ws_url}/ws/control") as ws_b,
+    ):
+        await do_ws_auth(ws_a, ec_p256_keypair)
+        fp_b = await do_ws_auth(ws_b, second_ec_p256_keypair)
+
+        await ws_a.send(json.dumps({"type": "CREATE_RELAY", "target_fingerprint": fp_b}))
+        created = json.loads(await ws_a.recv())
+        session_id = created["session_id"]
+        token_a = created["token"]
+        token_b = json.loads(await ws_b.recv())["token"]
+
+    url_relay = f"{base_ws_url}/ws/relay/{session_id}"
+    async with (
+        websockets.connect(
+            url_relay,
+            additional_headers={"Authorization": f"Bearer {token_a}"},
+        ) as relay_a,
+        websockets.connect(
+            url_relay,
+            additional_headers={"X-Relay-Token": token_b},
+        ),
+    ):
+        # Sending a text frame violates the binary-only specification
+        await relay_a.send("this is a text frame, not binary")
+
+        with pytest.raises(websockets.exceptions.ConnectionClosed) as exc_info:
+            await relay_a.recv()
+        assert exc_info.value.code == 1003
+
+
+@pytest.mark.asyncio
+async def test_relay_early_disconnect_detach(
+    live_server: tuple[str, int],
+    ec_p256_keypair: tuple[Any, Any, str, str],
+    second_ec_p256_keypair: tuple[Any, Any, str, str],
+) -> None:
+    """Ensure early disconnect of first peer detaches cleanly and tears down session."""
+    base_ws_url, _ = live_server
+
+    async with (
+        websockets.connect(f"{base_ws_url}/ws/control") as ws_a,
+        websockets.connect(f"{base_ws_url}/ws/control") as ws_b,
+    ):
+        await do_ws_auth(ws_a, ec_p256_keypair)
+        fp_b = await do_ws_auth(ws_b, second_ec_p256_keypair)
+
+        await ws_a.send(json.dumps({"type": "CREATE_RELAY", "target_fingerprint": fp_b}))
+        created = json.loads(await ws_a.recv())
+        session_id = created["session_id"]
+        token_a = created["token"]
+
+    url_relay = f"{base_ws_url}/ws/relay/{session_id}"
+    # Peer A connects and immediately closes
+    relay_a = await websockets.connect(
+        url_relay,
+        additional_headers={"Authorization": f"Bearer {token_a}"},
+    )
+    await relay_a.close(code=1000)
+
+    # Session teardown finishes cleanly
+    await asyncio.sleep(0.1)
