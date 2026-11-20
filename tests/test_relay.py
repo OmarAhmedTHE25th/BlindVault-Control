@@ -189,6 +189,7 @@ async def test_relay_early_disconnect_detach(
     live_server: tuple[str, int],
     ec_p256_keypair: tuple[Any, Any, str, str],
     second_ec_p256_keypair: tuple[Any, Any, str, str],
+    redis_store: Any,
 ) -> None:
     """Ensure early disconnect of first peer detaches cleanly and tears down session."""
     base_ws_url, _ = live_server
@@ -204,6 +205,11 @@ async def test_relay_early_disconnect_detach(
         created = json.loads(await ws_a.recv())
         session_id = created["session_id"]
         token_a = created["token"]
+        token_b = json.loads(await ws_b.recv())["token"]
+
+    # Verify session initially exists in Redis
+    session_before = await redis_store.get_relay_session(session_id)
+    assert session_before is not None
 
     url_relay = f"{base_ws_url}/ws/relay/{session_id}"
     # Peer A connects and immediately closes
@@ -213,5 +219,64 @@ async def test_relay_early_disconnect_detach(
     )
     await relay_a.close(code=1000)
 
-    # Session teardown finishes cleanly
-    await asyncio.sleep(0.1)
+    # Wait for the abort and cleanup handler to execute
+    await asyncio.sleep(0.15)
+
+    # Assert that the session is actually gone from Redis
+    session_after = await redis_store.get_relay_session(session_id)
+    assert session_after is None
+
+    # Assert that a subsequent connection attempt by Peer B is rejected (session is gone)
+    with pytest.raises(
+        (websockets.exceptions.ConnectionClosed, websockets.exceptions.InvalidStatus)
+    ) as exc_info:
+        async with websockets.connect(
+            url_relay,
+            additional_headers={"Authorization": f"Bearer {token_b}"},
+        ) as relay_b:
+            await relay_b.recv()
+
+    if isinstance(exc_info.value, websockets.exceptions.InvalidStatus):
+        assert exc_info.value.response.status_code == 403
+    else:
+        assert exc_info.value.code == 1008
+
+
+@pytest.mark.asyncio
+async def test_relay_session_detach_peer_unit() -> None:
+    """Unit test for RelaySession attach and detach lifecycle."""
+    from unittest.mock import MagicMock
+
+    from blindvault_control.relay import RelaySession
+
+    session = RelaySession(
+        session_id="test_detach_sess",
+        initiator_fp="fp_init",
+        responder_fp="fp_resp",
+        initiator_token="tok_init",
+        responder_token="tok_resp",
+    )
+
+    mock_ws_init = MagicMock()
+    mock_ws_resp = MagicMock()
+
+    # 1. Attach initiator
+    role_init = await session.attach_peer(mock_ws_init, "tok_init")
+    assert role_init == "initiator"
+    assert session.ws_initiator is mock_ws_init
+    assert not session.ready_event.is_set()
+
+    # 2. Detach initiator
+    await session.detach_peer("initiator")
+    assert session.ws_initiator is None
+    assert not session.ready_event.is_set()
+
+    # 3. Attach both peers -> ready_event is set
+    await session.attach_peer(mock_ws_init, "tok_init")
+    await session.attach_peer(mock_ws_resp, "tok_resp")
+    assert session.ready_event.is_set()
+
+    # 4. Detach responder -> ready_event cleared
+    await session.detach_peer("responder")
+    assert session.ws_responder is None
+    assert not session.ready_event.is_set()

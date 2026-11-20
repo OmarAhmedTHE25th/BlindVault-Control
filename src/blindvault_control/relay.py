@@ -97,6 +97,7 @@ class RelaySession:
             )
             for task in pending:
                 task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
         finally:
             self.closed_event.set()
             # Clean teardown of both sides
