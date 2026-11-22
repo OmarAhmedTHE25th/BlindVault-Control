@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="relayArc" x1="23.5" y1="33" x2="40.5" y2="33" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#635BFF" />
+      <stop offset="100%" stop-color="#0EA5E9" />
+    </linearGradient>
+  </defs>
+
+  <!-- 3 isometric facets matching BlindVault Core's hexagonal framing -->
+  <polygon points="7.75,18 32,4 56.25,18 32,32" fill="#1E293B" />
+  <polygon points="7.75,18 32,32 32,60 7.75,46" fill="#0F172A" />
+  <polygon points="32,32 56.25,18 56.25,46 32,60" fill="#171F3A" />
+
+  <!-- Outer hexagonal rim -->
+  <polygon
+    points="32,4 56.25,18 56.25,46 32,60 7.75,46 7.75,18"
+    fill="none"
+    stroke="#0F172A"
+    stroke-width="2"
+    stroke-linejoin="round"
+  />
+
+  <!-- 120-degree Stripe Indigo facet seams -->
+  <g stroke="#635BFF" stroke-opacity="0.78" stroke-width="1.5" stroke-linecap="round">
+    <line x1="17.71" y1="23.75" x2="7.75" y2="18" />
+    <line x1="46.29" y1="23.75" x2="56.25" y2="18" />
+    <line x1="32" y1="48.5" x2="32" y2="60" />
+  </g>
+
+  <!-- Inner hexagonal chamber -->
+  <polygon
+    points="32,15.5 46.29,23.75 46.29,40.25 32,48.5 17.71,40.25 17.71,23.75"
+    fill="#0F172A"
+    stroke="#635BFF"
+    stroke-width="2.2"
+    stroke-linejoin="round"
+  />
+
+  <!-- Encrypted relay arc + subtle hole-punch dashed baseline -->
+  <path
+    d="M23.5 33.2 C23.5 23.2, 40.5 23.2, 40.5 33.2"
+    stroke="url(#relayArc)"
+    stroke-width="2.8"
+    stroke-linecap="round"
+    fill="none"
+  />
+  <line
+    x1="28.2"
+    y1="37"
+    x2="35.8"
+    y2="37"
+    stroke="#38BDF8"
+    stroke-opacity="0.72"
+    stroke-width="1.7"
+    stroke-dasharray="2 2.2"
+    stroke-linecap="round"
+  />
+
+  <!-- Apex relay node dot -->
+  <circle cx="32" cy="25.8" r="2.8" fill="#0EA5E9" stroke="#0F172A" stroke-width="1.4" />
+
+  <!-- Peer A node -->
+  <circle cx="23.5" cy="37" r="3.8" fill="#0F172A" stroke="#635BFF" stroke-width="2.4" />
+  <circle cx="23.5" cy="37" r="1.4" fill="#FFFFFF" />
+
+  <!-- Peer B node -->
+  <circle cx="40.5" cy="37" r="3.8" fill="#0F172A" stroke="#0EA5E9" stroke-width="2.4" />
+  <circle cx="40.5" cy="37" r="1.4" fill="#FFFFFF" />
+</svg>

@@ -1,3 +1,7 @@
+<p align="left">
+  <img src="assets/logo.svg" alt="blindvault-control — Zero-Knowledge Signaling & Relay" width="416" />
+</p>
+
 # BlindVault Control Plane (`blindvault-control`)
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)

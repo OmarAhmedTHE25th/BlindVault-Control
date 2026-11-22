@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="416" height="88" viewBox="0 0 416 88" fill="none">
+  <defs>
+    <linearGradient id="relayArcBanner" x1="23.5" y1="33" x2="40.5" y2="33" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#635BFF" />
+      <stop offset="100%" stop-color="#0EA5E9" />
+    </linearGradient>
+  </defs>
+
+  <!-- Dual-theme light pill backdrop for GitHub Light and Dark modes -->
+  <rect x="4" y="4" width="408" height="80" rx="20" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1.5" />
+
+  <!-- Companion hexagonal mark with two peer nodes & relay arc (60x60) -->
+  <g transform="translate(18, 14) scale(0.9375)">
+    <polygon points="7.75,18 32,4 56.25,18 32,32" fill="#1E293B" />
+    <polygon points="7.75,18 32,32 32,60 7.75,46" fill="#0F172A" />
+    <polygon points="32,32 56.25,18 56.25,46 32,60" fill="#171F3A" />
+
+    <polygon
+      points="32,4 56.25,18 56.25,46 32,60 7.75,46 7.75,18"
+      fill="none"
+      stroke="#0F172A"
+      stroke-width="2"
+      stroke-linejoin="round"
+    />
+
+    <g stroke="#635BFF" stroke-opacity="0.78" stroke-width="1.5" stroke-linecap="round">
+      <line x1="17.71" y1="23.75" x2="7.75" y2="18" />
+      <line x1="46.29" y1="23.75" x2="56.25" y2="18" />
+      <line x1="32" y1="48.5" x2="32" y2="60" />
+    </g>
+
+    <polygon
+      points="32,15.5 46.29,23.75 46.29,40.25 32,48.5 17.71,40.25 17.71,23.75"
+      fill="#0F172A"
+      stroke="#635BFF"
+      stroke-width="2.2"
+      stroke-linejoin="round"
+    />
+
+    <path
+      d="M23.5 33.2 C23.5 23.2, 40.5 23.2, 40.5 33.2"
+      stroke="url(#relayArcBanner)"
+      stroke-width="2.8"
+      stroke-linecap="round"
+      fill="none"
+    />
+    <line
+      x1="28.2"
+      y1="37"
+      x2="35.8"
+      y2="37"
+      stroke="#38BDF8"
+      stroke-opacity="0.72"
+      stroke-width="1.7"
+      stroke-dasharray="2 2.2"
+      stroke-linecap="round"
+    />
+
+    <circle cx="32" cy="25.8" r="2.8" fill="#0EA5E9" stroke="#0F172A" stroke-width="1.4" />
+    <circle cx="23.5" cy="37" r="3.8" fill="#0F172A" stroke="#635BFF" stroke-width="2.4" />
+    <circle cx="23.5" cy="37" r="1.4" fill="#FFFFFF" />
+    <circle cx="40.5" cy="37" r="3.8" fill="#0F172A" stroke="#0EA5E9" stroke-width="2.4" />
+    <circle cx="40.5" cy="37" r="1.4" fill="#FFFFFF" />
+  </g>
+
+  <!-- Wordmark typography -->
+  <text
+    x="92"
+    y="46"
+    fill="#0F172A"
+    font-family="'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+    font-size="29"
+    font-weight="800"
+    letter-spacing="-0.7"
+  >blindvault<tspan fill="#635BFF">-control</tspan></text>
+  <text
+    x="93"
+    y="65"
+    fill="#0284C7"
+    font-family="'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+    font-size="10.5"
+    font-weight="700"
+    letter-spacing="1.4"
+  >ZERO-KNOWLEDGE SIGNALING &amp; RELAY</text>
+</svg>
