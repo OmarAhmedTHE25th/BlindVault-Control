@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="BlindVault Control Plane — Zero-knowledge NAT-traversal signaling, Ed25519 UDP endpoint reflection, EC P-256 challenge auth, and opaque 64 KiB encrypted fallback relay." />
+  <title>blindvault-control — Zero-Knowledge Peer Discovery &amp; Encrypted Relay</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="ambient-mesh" aria-hidden="true"></div>
+
+  <!-- Sticky Glassmorphic Header -->
+  <header class="site-header" id="site-header">
+    <div class="container header-inner">
+      <div class="brand-group">
+        <a href="#top" class="brand-logo" aria-label="blindvault-control Home">
+          <span class="logo-mark" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <circle cx="5.5" cy="17.5" r="2.5" stroke="#635BFF" stroke-width="2" />
+              <circle cx="18.5" cy="17.5" r="2.5" stroke="#0EA5E9" stroke-width="2" />
+              <circle cx="12" cy="5.5" r="2.5" fill="#635BFF" />
+              <path d="M7.2 15.6L10.6 7.8M16.8 15.6L13.4 7.8M8 17.5h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            </svg>
+          </span>
+          <span class="brand-name">blindvault-control</span>
+        </a>
+
+        <div class="product-switcher" role="tablist" aria-label="Ecosystem component switcher">
+          <a
+            href="https://github.com/OmarAhmedTHE25th/BlindVault"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="switch-pill"
+          >
+            BlindVault Core
+          </a>
+          <button
+            type="button"
+            class="switch-pill is-active"
+            id="switch-control-pill"
+            role="tab"
+            aria-selected="true"
+          >
+            blindvault-control
+          </button>
+        </div>
+      </div>
+
+      <nav class="main-nav" aria-label="Primary navigation">
+        <a href="#flow">Flow</a>
+        <a href="#zero-knowledge">Zero-Knowledge</a>
+        <a href="#protocol">Protocol Explorer</a>
+        <a href="#performance">Performance</a>
+        <a href="#deploy">Deploy</a>
+      </nav>
+
+      <div class="header-actions">
+        <a
+          href="https://github.com/OmarAhmedTHE25th/blindvault-control"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="btn btn-github"
+        >
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
+          </svg>
+          <span>GitHub</span>
+        </a>
+
+        <button
+          type="button"
+          class="mobile-menu-btn"
+          id="mobile-menu-btn"
+          aria-expanded="false"
+          aria-controls="mobile-drawer"
+          aria-label="Toggle menu"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="mobile-drawer" id="mobile-drawer" hidden>
+      <a href="#flow">Flow</a>
+      <a href="#zero-knowledge">Zero-Knowledge</a>
+      <a href="#protocol">Protocol Explorer</a>
+      <a href="#performance">Performance</a>
+      <a href="#deploy">Deploy</a>
+      <a href="https://github.com/OmarAhmedTHE25th/BlindVault" target="_blank" rel="noopener noreferrer">BlindVault Core ↗</a>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- 1. Hero Section -->
+    <section class="hero-section">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <div class="hero-badge">
+            <span class="pulse-dot" aria-hidden="true"></span>
+            <span>Python 3.12+ • FastAPI • Redis 7 + Lua • Ed25519 UDP • mTLS Passthrough</span>
+          </div>
+
+          <h1 class="hero-title">
+            Zero-Knowledge Peer Discovery
+            <span class="title-accent">&amp; Encrypted Fallback Relay.</span>
+          </h1>
+
+          <p class="hero-subtitle">
+            Peers authenticate with EC P-256 signatures over replay-proof Redis nonces and introduce themselves with single-use 8-character Crockford codes. When firewalls block direct hole-punching, an opaque 64 KiB relay bridges end-to-end mutual TLS 1.3 ciphertext without ever inspecting filenames, sizes, or keys.
+          </p>
+
+          <div class="hero-cta">
+            <a href="#flow" class="btn btn-primary">
+              <span>Walk Through the Flow</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </a>
+            <a href="#protocol" class="btn btn-secondary">
+              <span>Explore Wire Protocol</span>
+            </a>
+          </div>
+        </div>
+
+        <!-- Interactive 3-Node Topology Card -->
+        <div class="hero-visual">
+          <div class="topology-card">
+            <div class="pipeline-header">
+              <div class="window-dots" aria-hidden="true">
+                <span></span><span></span><span></span>
+              </div>
+              <span class="pipeline-caption">3-Node Switchboard Preview</span>
+              <span class="pipeline-cycle-pill" id="hero-cycle-status">Auto-cycling</span>
+            </div>
+
+            <div class="topo-pills" role="tablist" aria-label="Connection topology mode">
+              <button type="button" class="topo-pill is-active" data-topo-mode="direct" role="tab" aria-selected="true">
+                <span class="pill-dot dot-emerald" aria-hidden="true"></span>
+                <span>Direct P2P Hole-Punch</span>
+              </button>
+              <button type="button" class="topo-pill" data-topo-mode="relay" role="tab" aria-selected="false">
+                <span class="pill-dot dot-cyan" aria-hidden="true"></span>
+                <span>64 KiB Relay Fallback</span>
+              </button>
+            </div>
+
+            <div class="topo-stage" id="topo-stage" data-mode="direct">
+              <div class="topo-hub">
+                <span class="node-kicker">Ephemeral Control Plane</span>
+                <strong>blindvault-control + Redis 7</strong>
+                <span class="node-sub mono">WS /ws/control • UDP :3478 • TTL RAM</span>
+              </div>
+
+              <svg class="topo-svg" viewBox="0 0 520 148" fill="none" aria-hidden="true">
+                <!-- Signaling arcs between Peer A / B and Control Plane -->
+                <path class="svg-path path-signal" d="M 110 112 C 110 56, 175 26, 222 22" />
+                <path class="svg-path path-signal" d="M 410 112 C 410 56, 345 26, 300 22" />
+
+                <!-- Encrypted Relay fallback arcs through control plane -->
+                <path class="svg-path path-relay" d="M 122 114 C 130 62, 192 34, 244 26" />
+                <path class="svg-path path-relay" d="M 276 26 C 328 34, 390 62, 398 114" />
+
+                <!-- Direct P2P Hole-Punch line between Peer A and Peer B -->
+                <path class="svg-path path-direct" d="M 152 122 L 368 122" />
+              </svg>
+
+              <div class="topo-center-pill" id="topo-path-badge">
+                <span class="badge-dot"></span>
+                <span id="topo-path-label">Direct mTLS 1.3 P2P Tunnel</span>
+              </div>
+
+              <div class="topo-peers-row">
+                <div class="topo-peer-card">
+                  <div class="peer-head">
+                    <span class="peer-title">Peer A</span>
+                    <span class="peer-role-tag mono">Initiator</span>
+                  </div>
+                  <span class="peer-fp mono">EC P-256 • a19f..8e04</span>
+                </div>
+
+                <div class="topo-peer-card">
+                  <div class="peer-head">
+                    <span class="peer-title">Peer B</span>
+                    <span class="peer-role-tag mono">Responder</span>
+                  </div>
+                  <span class="peer-fp mono">EC P-256 • 7c42..3d19</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="topo-telemetry">
+              <div class="telemetry-item">
+                <span class="meta-label">Data Path</span>
+                <strong id="telemetry-path">Direct UDP/TCP Hole-Punch</strong>
+              </div>
+              <div class="telemetry-item">
+                <span class="meta-label">Frame / Packet Guard</span>
+                <strong id="telemetry-guard">Ed25519 Signed BVST (:3478)</strong>
+              </div>
+              <div class="telemetry-item">
+                <span class="meta-label">Server Visibility</span>
+                <strong class="text-emerald" id="telemetry-visibility">Signal Hints Only • 0 Keys</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Interactive 4-Step Connection Walkthrough -->
+    <section class="flow-section reveal-on-scroll" id="flow">
+      <div class="container">
+        <div class="section-intro">
+          <span class="eyebrow">How Connections Establish</span>
+          <h2>Four Ephemeral Steps From Discovery to Encrypted Stream</h2>
+          <p>
+            Every handshake, invite code, NAT reflection probe, and fallback tunnel is stateless on disk and bound by automatic Redis TTLs.
+          </p>
+        </div>
+
+        <div class="stepper-shell">
+          <div class="step-tabs" role="tablist" aria-label="Connection lifecycle steps">
+            <button type="button" class="step-tab is-active" data-step="auth" role="tab" aria-selected="true">
+              <span class="step-num">01</span>
+              <span class="step-text">
+                <strong>EC P-256 Challenge Auth</strong>
+                <small class="mono">/ws/control</small>
+              </span>
+            </button>
+
+            <button type="button" class="step-tab" data-step="pairing" role="tab" aria-selected="false">
+              <span class="step-num">02</span>
+              <span class="step-text">
+                <strong>Crockford Base32 Pairing</strong>
+                <small class="mono">8 chars • 300s TTL</small>
+              </span>
+            </button>
+
+            <button type="button" class="step-tab" data-step="udp" role="tab" aria-selected="false">
+              <span class="step-num">03</span>
+              <span class="step-text">
+                <strong>Ed25519 UDP Reflector</strong>
+                <small class="mono">UDP :3478 • BVST</small>
+              </span>
+            </button>
+
+            <button type="button" class="step-tab" data-step="relay" role="tab" aria-selected="false">
+              <span class="step-num">04</span>
+              <span class="step-text">
+                <strong>Opaque Fallback Relay</strong>
+                <small class="mono">/ws/relay/{session_id}</small>
+              </span>
+            </button>
+          </div>
+
+          <div class="stepper-grid">
+            <!-- Left Visual Story Card -->
+            <div class="step-visual-card">
+              <!-- Step 1: Auth -->
+              <div class="step-visual-pane is-active" data-step-panel="auth">
+                <div class="step-visual-head">
+                  <span class="status-badge badge-indigo">Replay-Proof Handshake</span>
+                  <span class="meta-mono">SECP256R1 Strictly Enforced</span>
+                </div>
+                <h3>Prove Identity Without Sending Private Keys</h3>
+                <p class="step-desc">
+                  The peer submits its PEM/DER public key in <code class="mono-inline">HELLO</code>. Only <code class="mono-inline">secp256r1</code> keys pass curve validation to derive the lowercase SHA-256 fingerprint, then the server stores a 32-byte nonce in Redis consumed once via <code class="mono-inline">GETDEL</code>.
+                </p>
+
+                <div class="hop-sequence">
+                  <div class="hop-box">
+                    <span class="hop-dir mono">Client → Server</span>
+                    <strong class="mono">HELLO</strong>
+                    <span>EC P-256 SPKI Key</span>
+                  </div>
+                  <span class="hop-arrow" aria-hidden="true">→</span>
+                  <div class="hop-box is-accent">
+                    <span class="hop-dir mono">Server → Client</span>
+                    <strong class="mono">32B CHALLENGE</strong>
+                    <span>nonce:{fp} (30s TTL)</span>
+                  </div>
+                  <span class="hop-arrow" aria-hidden="true">→</span>
+                  <div class="hop-box">
+                    <span class="hop-dir mono">Client → Server</span>
+                    <strong class="mono">ECDSA AUTH</strong>
+                    <span>Atomic Redis GETDEL</span>
+                  </div>
+                  <span class="hop-arrow" aria-hidden="true">→</span>
+                  <div class="hop-box is-emerald">
+                    <span class="hop-dir mono">Server → Client</span>
+                    <strong class="mono">AUTH_OK</strong>
+                    <span>60s TTL • 20s PING</span>
+                  </div>
+                </div>
+
+                <div class="step-facts-row">
+                  <span class="fact-chip">Max control frame: 8 KiB</span>
+                  <span class="fact-chip">Heartbeat: 20s PING/PONG</span>
+                  <span class="fact-chip">Rate limit: 10 handshakes/min/IP</span>
+                </div>
+              </div>
+
+              <!-- Step 2: Pairing -->
+              <div class="step-visual-pane" data-step-panel="pairing" hidden>
+                <div class="step-visual-head">
+                  <span class="status-badge badge-cyan">Zero Social Graph</span>
+                  <span class="meta-mono">invite:{code} • 300s TTL</span>
+                </div>
+                <h3>Human-Safe Out-of-Band Invites</h3>
+                <p class="step-desc">
+                  Peers exchange a short 8-character Crockford Base32 code (excluding ambiguous <code class="mono-inline">I, L, O, U</code> characters). Claiming atomically deletes the invite via <code class="mono-inline">GETDEL</code>, blocks self-pairing, and delivers mutual <code class="mono-inline">PEER_MATCHED</code> messages containing only client-declared endpoints.
+                </p>
+
+                <div class="crockford-ticket">
+                  <div>
+                    <span class="meta-label">Live Ephemeral Invite Sample</span>
+                    <div class="ticket-code-row">
+                      <span class="ticket-code mono" id="crockford-ticket">K7M9-P3Q2</span>
+                      <span class="ttl-pill mono">TTL 300s</span>
+                    </div>
+                    <span class="ticket-note">Normalized automatically (uppercase, stripped hyphens) • Alphabet omits I, L, O, U</span>
+                  </div>
+                  <button type="button" class="btn btn-subtle-indigo" id="gen-crockford-btn">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5m-5 4a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16m-5 0h5v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                    <span>Generate Sample Code</span>
+                  </button>
+                </div>
+
+                <div class="step-facts-row">
+                  <span class="fact-chip">Self-pairing blocked</span>
+                  <span class="fact-chip">Server IP never leaked in PEER_MATCHED</span>
+                  <span class="fact-chip">10 invites/min • 10 claims/min</span>
+                </div>
+              </div>
+
+              <!-- Step 3: UDP Reflector -->
+              <div class="step-visual-pane" data-step-panel="udp" hidden>
+                <div class="step-visual-head">
+                  <span class="status-badge badge-indigo">Signed NAT Discovery</span>
+                  <span class="meta-mono">UDP Port 3478 • Ed25519</span>
+                </div>
+                <h3>Cryptographically Signed Endpoint Reflection</h3>
+                <p class="step-desc">
+                  Instead of unsigned STUN packets, a 20-byte <code class="mono-inline">"BVST"</code> probe returns a 99-byte (IPv4) or 111-byte (IPv6) packet signed by the server's Ed25519 key (published via <code class="mono-inline">GET /api/v1/info</code>), preventing address spoofing before <code class="mono-inline">SIGNAL_OFFER</code>, <code class="mono-inline">SIGNAL_ANSWER</code>, and <code class="mono-inline">HOLE_PUNCH_SYNC</code>.
+                </p>
+
+                <div class="byte-ribbon" aria-label="BVST packet byte layout">
+                  <div class="byte-seg seg-indigo">
+                    <span class="mono">[0:4]</span>
+                    <strong>BVST</strong>
+                    <small>4B Magic</small>
+                  </div>
+                  <div class="byte-seg">
+                    <span class="mono">[4:20]</span>
+                    <strong>Nonce</strong>
+                    <small>16B Echo</small>
+                  </div>
+                  <div class="byte-seg">
+                    <span class="mono">[20]</span>
+                    <strong>4 | 6</strong>
+                    <small>1B Fam</small>
+                  </div>
+                  <div class="byte-seg seg-cyan">
+                    <span class="mono">[21:+L]</span>
+                    <strong>IP</strong>
+                    <small>4B / 16B</small>
+                  </div>
+                  <div class="byte-seg">
+                    <span class="mono">[+2]</span>
+                    <strong>Port</strong>
+                    <small>uint16 !H</small>
+                  </div>
+                  <div class="byte-seg">
+                    <span class="mono">[+8]</span>
+                    <strong>Epoch</strong>
+                    <small>uint64 !Q</small>
+                  </div>
+                  <div class="byte-seg seg-emerald">
+                    <span class="mono">[+64]</span>
+                    <strong>Ed25519 Sig</strong>
+                    <small>64B Auth</small>
+                  </div>
+                </div>
+
+                <div class="step-facts-row">
+                  <span class="fact-chip">Request: 20 bytes fixed</span>
+                  <span class="fact-chip">Response: 99B (IPv4) / 111B (IPv6)</span>
+                  <span class="fact-chip">Algorithm: Ed25519 over [0:31+L]</span>
+                </div>
+              </div>
+
+              <!-- Step 4: Fallback Relay -->
+              <div class="step-visual-pane" data-step-panel="relay" hidden>
+                <div class="step-visual-head">
+                  <span class="status-badge badge-emerald">Opaque mTLS 1.3 Tunnel</span>
+                  <span class="meta-mono">64 KiB Binary Frames</span>
+                </div>
+                <h3>Blind Backpressure Relay Across Replicas</h3>
+                <p class="step-desc">
+                  When symmetric NAT blocks direct connectivity, <code class="mono-inline">CREATE_RELAY</code> mints a 30s single-use <code class="mono-inline">Bearer</code> token bound strictly to <code class="mono-inline">(initiator, responder)</code> and invites the peer over <code class="mono-inline">RELAY_INVITE</code>. Same-replica peers bridge in-memory; split replicas bridge over Redis Pub/Sub.
+                </p>
+
+                <div class="relay-bridge-diagram">
+                  <div class="bridge-endpoint">
+                    <strong>Initiator</strong>
+                    <span class="mono">Bearer &lt;token_a&gt;</span>
+                  </div>
+                  <div class="bridge-pipe">
+                    <span class="pipe-label mono">bv:relay:{session_id}:a2b / b2a</span>
+                    <div class="pipe-line">
+                      <span>64 KiB Opaque Ciphertext (mTLS 1.3 Inside)</span>
+                    </div>
+                  </div>
+                  <div class="bridge-endpoint">
+                    <strong>Responder</strong>
+                    <span class="mono">Bearer &lt;token_b&gt;</span>
+                  </div>
+                </div>
+
+                <div class="step-facts-row">
+                  <span class="fact-chip">Text frames rejected: 1003</span>
+                  <span class="fact-chip">Frames &gt; 65,536 B rejected: 1009</span>
+                  <span class="fact-chip">30s idle / 900s max session</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Live JSON Preview -->
+            <div class="step-code-card">
+              <div class="code-card-head">
+                <div class="code-card-title">
+                  <span class="code-route mono" id="step-code-route">WS /ws/control — Auth Sequence</span>
+                </div>
+                <button type="button" class="btn-copy" id="copy-step-json-btn" aria-label="Copy JSON example">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" stroke-width="2" />
+                  </svg>
+                  <span id="copy-step-label">Copy</span>
+                </button>
+              </div>
+              <pre class="step-json-pre mono"><code id="step-json-code"></code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Bento Grid — Privacy & Rate-Limiting Guarantees -->
+    <section class="bento-section reveal-on-scroll" id="zero-knowledge">
+      <div class="container">
+        <div class="section-intro">
+          <span class="eyebrow">Cryptographic &amp; Operational Invariants</span>
+          <h2>Privacy &amp; Rate-Limiting Guarantees</h2>
+          <p>
+            No databases, no file inspection, no weak elliptic curves—enforced in code, Redis Lua scripts, and hermetic CI tests.
+          </p>
+        </div>
+
+        <div class="bento-grid">
+          <!-- Card 1 -->
+          <article class="bento-card">
+            <div class="bento-icon icon-indigo">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="2" />
+                <path d="M12 7.5v5l3.2 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </div>
+            <h3>Zero Persistent Storage</h3>
+            <p>All runtime state lives strictly in Redis RAM with <code class="mono-inline">30s–300s</code> TTLs and disk persistence disabled (<code class="mono-inline">--appendonly no --save ""</code>).</p>
+            <div class="bento-micro mono">
+              <span class="micro-pill">nonce: 30s</span>
+              <span class="micro-pill">presence: 60s</span>
+              <span class="micro-pill">invite: 300s</span>
+            </div>
+          </article>
+
+          <!-- Card 2 -->
+          <article class="bento-card">
+            <div class="bento-icon icon-cyan">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z" stroke="currentColor" stroke-width="2" />
+                <path d="M4 4l16 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </div>
+            <h3>Automatic IP Scrubbing</h3>
+            <p><code class="mono-inline">ip_scrubbing_processor</code> automatically rewrites IPv4 and IPv6 addresses across structured <code class="mono-inline">structlog</code> JSON events.</p>
+            <div class="bento-micro mono">
+              <span class="micro-muted">client_ip →</span>
+              <span class="micro-pill pill-emerald">[REDACTED_IP]</span>
+            </div>
+          </article>
+
+          <!-- Card 3 -->
+          <article class="bento-card">
+            <div class="bento-icon icon-indigo">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M12 3l7 3.2v5.4c0 4.6-2.9 8.6-7 9.9-4.1-1.3-7-5.3-7-9.9V6.2L12 3z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
+                <path d="M9.5 12.2l1.8 1.8 3.6-3.8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </div>
+            <h3>Curve Confusion Guard</h3>
+            <p><code class="mono-inline">parse_ec_p256_public_key</code> verifies the curve is strictly <code class="mono-inline">SECP256R1</code>—immediately rejecting RSA, <code class="mono-inline">secp256k1</code>, and <code class="mono-inline">secp384r1</code>.</p>
+            <div class="bento-micro mono">
+              <span class="micro-pill pill-emerald">P-256 ✓</span>
+              <span class="micro-pill pill-amber">RSA / k1 / P-384 ✕</span>
+            </div>
+          </article>
+
+          <!-- Card 4 -->
+          <article class="bento-card">
+            <div class="bento-icon icon-amber">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M13 3L5 14h6l-1 7 9-11h-6l0-7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
+              </svg>
+            </div>
+            <h3>Atomic Redis Lua Token Buckets</h3>
+            <p><code class="mono-inline">TOKEN_BUCKET_LUA</code> enforces burst-proof sliding refill budgets in a single atomic Redis evaluation with zero race conditions.</p>
+            <div class="bento-micro mono">
+              <span class="micro-pill">Auth 10/m</span>
+              <span class="micro-pill">Invite 10/m</span>
+              <span class="micro-pill">Claim 10/m</span>
+              <span class="micro-pill">Relay 5/m</span>
+            </div>
+          </article>
+
+          <!-- Card 5 -->
+          <article class="bento-card">
+            <div class="bento-icon icon-cyan">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <rect x="3" y="4" width="7" height="7" rx="2" stroke="currentColor" stroke-width="2" />
+                <rect x="14" y="4" width="7" height="7" rx="2" stroke="currentColor" stroke-width="2" />
+                <rect x="8.5" y="14" width="7" height="6" rx="2" stroke="currentColor" stroke-width="2" />
+                <path d="M6.5 11v2h11v-2M12 13v1" stroke="currentColor" stroke-width="1.8" />
+              </svg>
+            </div>
+            <h3>Horizontal Multi-Replica Scaling</h3>
+            <p>Load-balanced instances route control envelopes on <code class="mono-inline">bv:peer:{fingerprint}</code> and bridge binary relay chunks over <code class="mono-inline">bv:relay:*</code> Pub/Sub.</p>
+            <div class="bento-micro mono">
+              <span class="micro-pill">bv:peer:*</span>
+              <span class="micro-arrow">⇄</span>
+              <span class="micro-pill pill-cyan">bv:relay:a2b / b2a</span>
+            </div>
+          </article>
+
+          <!-- Card 6 -->
+          <article class="bento-card">
+            <div class="bento-icon icon-emerald">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <rect x="4" y="4" width="16" height="16" rx="3" stroke="currentColor" stroke-width="2" />
+                <path d="M8.5 12.2l2.3 2.3 4.7-4.8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </div>
+            <h3>41/41 Hermetic Tests</h3>
+            <p>Deterministic coverage via <code class="mono-inline">fakeredis[lua]</code>, strict <code class="mono-inline">mypy src/</code>, and <code class="mono-inline">ruff check .</code> spanning crypto, auth, pairing, Ed25519 UDP, and 10 MiB relay streams.</p>
+            <div class="bento-micro mono">
+              <span class="micro-pill pill-emerald">pytest 41/41</span>
+              <span class="micro-pill">mypy --strict</span>
+              <span class="micro-pill">ruff ✓</span>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. Interactive Wire Protocol & UDP Packet Explorer -->
+    <section class="explorer-section reveal-on-scroll" id="protocol">
+      <div class="container">
+        <div class="section-intro">
+          <span class="eyebrow">Wire Specification Explorer</span>
+          <h2>Interactive Wire Protocol &amp; UDP Packet Explorer</h2>
+          <p>
+            Filter WebSocket control messages or inspect exact UDP <code class="mono-inline">BVST</code> byte offsets matching <code class="mono-inline">schemas.py</code> and <code class="mono-inline">udp_reflector.py</code>.
+          </p>
+        </div>
+
+        <div class="explorer-toolbar">
+          <div class="search-input-wrap">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" />
+              <path d="M16.5 16.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+            <input
+              type="search"
+              id="protocol-search"
+              placeholder="Search message, field, TTL, or close code (e.g. BVST, 1003, GETDEL)..."
+              aria-label="Filter wire protocol messages"
+            />
+          </div>
+
+          <div class="category-filters" role="tablist" aria-label="Protocol category filter">
+            <button type="button" class="filter-chip is-active" data-category="all" role="tab" aria-selected="true">All</button>
+            <button type="button" class="filter-chip" data-category="auth" role="tab" aria-selected="false">Auth</button>
+            <button type="button" class="filter-chip" data-category="pairing" role="tab" aria-selected="false">Pairing</button>
+            <button type="button" class="filter-chip" data-category="signaling" role="tab" aria-selected="false">Signaling</button>
+            <button type="button" class="filter-chip" data-category="relay" role="tab" aria-selected="false">Relay</button>
+            <button type="button" class="filter-chip" data-category="udp" role="tab" aria-selected="false">UDP Binary</button>
+          </div>
+        </div>
+
+        <div class="explorer-shell">
+          <aside class="protocol-rail" aria-label="Wire messages">
+            <div class="protocol-list" id="protocol-list">
+              <!-- Populated by app.js -->
+            </div>
+            <div class="protocol-empty" id="protocol-empty" hidden>
+              <p>No protocol entries match that query.</p>
+              <button type="button" class="btn btn-subtle-indigo" id="reset-proto-btn">Reset filters</button>
+            </div>
+          </aside>
+
+          <div class="protocol-inspector" id="protocol-inspector" aria-live="polite">
+            <!-- Populated by app.js -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. Big Typographic Benchmark Strip -->
+    <section class="benchmarks-section reveal-on-scroll" id="performance">
+      <div class="container">
+        <div class="section-intro">
+          <span class="eyebrow">Measured Async Concurrency</span>
+          <h2>High-Throughput Control &amp; Opaque Relay Speed</h2>
+          <p>
+            All figures come directly from <code class="mono-inline">benchmarks/bench_control.py</code> executed on an 8-core CPU workload with zero bytes corrupted.
+          </p>
+        </div>
+
+        <div class="stats-grid-3">
+          <article class="stat-card">
+            <div class="stat-value">312 <span class="stat-unit">handshakes/s</span></div>
+            <div class="stat-label">ECDSA Challenge Auth Peak</div>
+            <div class="stat-detail mono">500 concurrent handshakes (25 workers) • 73.8 ms p50 • 108.8 ms p95</div>
+          </article>
+
+          <article class="stat-card">
+            <div class="stat-value">500 <span class="stat-unit">peers</span></div>
+            <div class="stat-label">Concurrent Authenticated Sessions</div>
+            <div class="stat-detail mono">100% WebSocket success • 135.2 ms fan-out ping p50 • 150.1 ms p95</div>
+          </article>
+
+          <article class="stat-card">
+            <div class="stat-value">9.60 <span class="stat-unit">MiB/s</span></div>
+            <div class="stat-label">64 KiB Encrypted Relay Stream</div>
+            <div class="stat-detail mono">~80.5 Mbps on 100 MiB transfer • 100% SHA-256 integrity</div>
+          </article>
+        </div>
+
+        <div class="drawer-wrap">
+          <button
+            type="button"
+            class="btn btn-drawer"
+            id="toggle-bench-btn"
+            aria-expanded="false"
+            aria-controls="bench-drawer"
+          >
+            <span id="toggle-bench-label">View Full Benchmark Table (benchmarks/bench_control.py)</span>
+            <svg class="drawer-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+
+          <div class="bench-drawer" id="bench-drawer" hidden>
+            <div class="drawer-meta mono">
+              Suite: benchmarks/bench_control.py • Workload: 8-core CPU • fakeredis[lua] + uvicorn asyncio WebSocket server
+            </div>
+            <div class="table-scroll">
+              <table class="bench-table mono">
+                <thead>
+                  <tr>
+                    <th>Benchmark Metric</th>
+                    <th>Workload / Scenario</th>
+                    <th>Measured Result</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>ECDSA Challenge-Response Handshakes</td>
+                    <td>500 handshakes (25 concurrent workers)</td>
+                    <td>185 – 312 handshakes/s</td>
+                  </tr>
+                  <tr>
+                    <td>Handshake Latency (p50)</td>
+                    <td>25 concurrent workers</td>
+                    <td>73.8 ms – 131.8 ms</td>
+                  </tr>
+                  <tr>
+                    <td>Handshake Latency (p95)</td>
+                    <td>25 concurrent workers</td>
+                    <td>108.8 ms – 190.4 ms</td>
+                  </tr>
+                  <tr>
+                    <td>Handshake Latency (p99)</td>
+                    <td>25 concurrent workers</td>
+                    <td>109.3 ms – 191.4 ms</td>
+                  </tr>
+                  <tr>
+                    <td>Concurrent Authenticated WS Sessions</td>
+                    <td>Zero-knowledge idle peers</td>
+                    <td>500 concurrent peers (100% success)</td>
+                  </tr>
+                  <tr>
+                    <td>Heartbeat Fan-out Ping Latency (p50)</td>
+                    <td>500 connected peers</td>
+                    <td>135.2 ms</td>
+                  </tr>
+                  <tr>
+                    <td>Heartbeat Fan-out Ping Latency (p95)</td>
+                    <td>500 connected peers</td>
+                    <td>150.1 ms</td>
+                  </tr>
+                  <tr>
+                    <td>Encrypted Fallback Relay Throughput</td>
+                    <td>100 MiB stream (64 KiB chunks)</td>
+                    <td>8.31 – 9.60 MiB/s (~70 – 80.5 Mbps)</td>
+                  </tr>
+                  <tr>
+                    <td>Relay End-to-End Data Integrity</td>
+                    <td>SHA-256 verification</td>
+                    <td>100% match (zero corrupt bytes)</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. Tabbed Deploy & Quickstart Card -->
+    <section class="deploy-section reveal-on-scroll" id="deploy">
+      <div class="container">
+        <div class="section-intro">
+          <span class="eyebrow">Production &amp; Local Setup</span>
+          <h2>Deploy With Docker Compose or Run Locally</h2>
+          <p>
+            Includes an ephemeral RAM-only Redis 7 container, FastAPI control/relay ports (<code class="mono-inline">:8000</code> TCP), and UDP endpoint reflection (<code class="mono-inline">:3478</code> UDP).
+          </p>
+        </div>
+
+        <div class="code-workbench">
+          <div class="code-tabs-bar">
+            <div class="code-tabs" role="tablist" aria-label="Deployment workflow tabs">
+              <button type="button" class="code-tab is-active" data-deploy-tab="docker" role="tab" aria-selected="true">Docker Compose</button>
+              <button type="button" class="code-tab" data-deploy-tab="local" role="tab" aria-selected="false">Local Dev &amp; Pytest</button>
+              <button type="button" class="code-tab" data-deploy-tab="env" role="tab" aria-selected="false">Key Environment Variables</button>
+            </div>
+
+            <button type="button" class="btn-copy" id="copy-deploy-btn" aria-label="Copy deployment commands">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" stroke-width="2" />
+              </svg>
+              <span id="copy-deploy-label">Copy</span>
+            </button>
+          </div>
+
+          <div class="code-panes">
+            <pre class="code-block is-active mono" data-deploy-panel="docker"><code># 1. Clone and boot Redis 7 (RAM-only: --appendonly no --save "") + blindvault-control
+git clone https://github.com/OmarAhmedTHE25th/blindvault-control.git
+cd blindvault-control
+docker compose up --build
+
+# 2. Verify liveness, readiness, and Ed25519 UDP public key discovery
+curl -s http://localhost:8000/health | jq
+curl -s http://localhost:8000/ready | jq
+curl -s http://localhost:8000/api/v1/info | jq
+
+# Exposed Services:
+# - Control &amp; Relay WebSockets: ws://localhost:8000/ws/control &amp; /ws/relay/{session_id}
+# - Signed UDP Reflector:       udp://localhost:3478 (Magic: BVST / 0x42565354)</code></pre>
+
+            <pre class="code-block mono" data-deploy-panel="local" hidden><code># 1. Create virtual env and install runtime + dev dependencies (Python 3.12+)
+pip install -e ".[dev]"
+
+# 2. Run 41/41 hermetic tests (fakeredis[lua]) + strict typing + linting
+pytest -v
+mypy src/
+ruff check .
+ruff format --check .
+
+# 3. Start FastAPI + UDP reflector locally &amp; run performance benchmarks
+blindvault-control
+python benchmarks/bench_control.py</code></pre>
+
+            <pre class="code-block mono" data-deploy-panel="env" hidden><code># Core Bindings &amp; Production Signing Key
+BLINDVAULT_ENVIRONMENT=production
+BLINDVAULT_HOST=0.0.0.0
+BLINDVAULT_PORT=8000
+BLINDVAULT_UDP_PORT=3478
+BLINDVAULT_UDP_SIGNING_PRIVATE_KEY=&lt;PEM_OR_64_HEX_SEED_OR_BASE64_32B&gt;
+
+# Redis Ephemeral Store &amp; Privacy Logging
+BLINDVAULT_REDIS_URL=redis://localhost:6379/0
+BLINDVAULT_ALLOWED_ORIGINS=["*"]
+BLINDVAULT_SCRUB_IPS_IN_LOGS=true
+
+# Atomic Lua Rate Limits (per minute) &amp; Frame / TTL Bounds
+BLINDVAULT_RATE_LIMIT_HANDSHAKE_PER_MIN=10
+BLINDVAULT_RATE_LIMIT_INVITE_PER_MIN=10
+BLINDVAULT_RATE_LIMIT_CLAIM_PER_MIN=10
+BLINDVAULT_RATE_LIMIT_RELAY_PER_MIN=5
+BLINDVAULT_RELAY_MAX_FRAME_BYTES=65536
+BLINDVAULT_RELAY_MAX_SESSION_SECONDS=900
+BLINDVAULT_RELAY_IDLE_TIMEOUT_SECONDS=30
+BLINDVAULT_INVITE_TTL_SECONDS=300</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Minimal Clean Footer -->
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <strong>blindvault-control</strong>
+        <span>Zero-Knowledge NAT-Traversal Signaling &amp; Encrypted Fallback Relay • MIT License</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/OmarAhmedTHE25th/blindvault-control" target="_blank" rel="noopener noreferrer">blindvault-control Repo</a>
+        <a href="https://github.com/OmarAhmedTHE25th/BlindVault" target="_blank" rel="noopener noreferrer">BlindVault Core Repo</a>
+        <a href="../README.md">Technical README</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>
