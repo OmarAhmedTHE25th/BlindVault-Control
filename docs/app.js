@@ -55,10 +55,83 @@
     });
   }
 
-  const controlPill = document.getElementById("switch-control-pill");
-  if (controlPill) {
-    controlPill.addEventListener("click", () => {
-      document.getElementById("top")?.scrollIntoView({ behavior: "smooth" });
+  const switcher = document.querySelector(".product-switcher");
+  if (switcher) {
+    const thumb = switcher.querySelector(".switch-thumb");
+    const switchPills = Array.from(switcher.querySelectorAll(".switch-pill"));
+    const initialProduct = switcher.dataset.active || "control";
+    let navigating = false;
+
+    const positionThumb = (pill, instant) => {
+      if (!pill || !thumb) return;
+      if (instant) switcher.classList.add("no-anim");
+      thumb.style.width = `${pill.offsetWidth}px`;
+      thumb.style.transform = `translateX(${pill.offsetLeft}px)`;
+      switcher.classList.add("is-ready");
+      if (instant) {
+        void thumb.offsetWidth;
+        switcher.classList.remove("no-anim");
+      }
+    };
+
+    const resetToInitial = () => {
+      navigating = false;
+      let activePill = null;
+      switchPills.forEach((pill) => {
+        const isCurrent = pill.dataset.product === initialProduct;
+        pill.classList.toggle("is-active", isCurrent);
+        if (isCurrent) {
+          pill.setAttribute("aria-current", "page");
+          activePill = pill;
+        } else {
+          pill.removeAttribute("aria-current");
+        }
+      });
+      positionThumb(activePill, true);
+    };
+
+    resetToInitial();
+    window.addEventListener("resize", () => {
+      positionThumb(switcher.querySelector(".switch-pill.is-active"), true);
+    });
+    window.addEventListener("pageshow", resetToInitial);
+    document.fonts?.ready?.then(() => {
+      positionThumb(switcher.querySelector(".switch-pill.is-active"), true);
+    });
+
+    switchPills.forEach((pill) => {
+      pill.addEventListener("click", (e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
+          return;
+        }
+        e.preventDefault();
+        if (pill.dataset.product === initialProduct) {
+          document.getElementById("top")?.scrollIntoView({ behavior: "smooth" });
+          return;
+        }
+        if (navigating) return;
+        navigating = true;
+
+        switchPills.forEach((p) => {
+          const active = p === pill;
+          p.classList.toggle("is-active", active);
+          if (active) {
+            p.setAttribute("aria-current", "page");
+          } else {
+            p.removeAttribute("aria-current");
+          }
+        });
+        positionThumb(pill, false);
+
+        const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        if (reduceMotion) {
+          window.location.assign(pill.href);
+        } else {
+          window.setTimeout(() => {
+            window.location.assign(pill.href);
+          }, 200);
+        }
+      });
     });
   }
 
