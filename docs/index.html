@@ -48,6 +48,7 @@
         <a href="#zero-knowledge">Zero-Knowledge</a>
         <a href="#protocol">Protocol Explorer</a>
         <a href="#performance">Performance</a>
+        <a href="#cli-tests">Test Runs</a>
         <a href="#deploy">Deploy</a>
       </nav>
 
@@ -84,6 +85,7 @@
       <a href="#zero-knowledge">Zero-Knowledge</a>
       <a href="#protocol">Protocol Explorer</a>
       <a href="#performance">Performance</a>
+      <a href="#cli-tests">Test Runs</a>
       <a href="#deploy">Deploy</a>
       <a href="https://github.com/OmarAhmedTHE25th/BlindVault" target="_blank" rel="noopener noreferrer">BlindVault Core ↗</a>
     </div>
@@ -729,7 +731,50 @@
       </div>
     </section>
 
-    <!-- 6. Tabbed Deploy & Quickstart Card -->
+    <!-- 6. Verified CLI & Terminal Test Runs -->
+    <section class="terminal-gallery-section reveal-on-scroll" id="cli-tests">
+      <div class="container">
+        <div class="section-intro">
+          <span class="eyebrow">Real CLI &amp; Terminal Captures</span>
+          <h2>Verified Hermetic Test Suite &amp; Strict Static Checks</h2>
+          <p>
+            Actual terminal captures of <code class="mono-inline">pytest -v</code> passing all 41 integration tests over <code class="mono-inline">fakeredis[lua]</code> alongside strict <code class="mono-inline">mypy</code>, <code class="mono-inline">ruff check</code>, and formatting verification.
+          </p>
+        </div>
+
+        <div class="terminal-shot-grid">
+          <figure class="terminal-shot-card">
+            <div class="terminal-shot-media">
+              <img
+                src="./images/cli-pytest-run.png"
+                alt="blindvault-control pytest -v output showing 41 passed tests across auth, crypto, pairing, rate limiter, relay, and UDP reflector"
+                loading="lazy"
+              />
+            </div>
+            <figcaption class="terminal-shot-caption">
+              <strong>Pytest Security &amp; Integration Run (41/41 Passed)</strong>
+              <span class="mono">pytest -v (fakeredis[lua] + live multi-replica Pub/Sub + 10 MiB relay)</span>
+            </figcaption>
+          </figure>
+
+          <figure class="terminal-shot-card">
+            <div class="terminal-shot-media">
+              <img
+                src="./images/terminal-quality-checks.png"
+                alt="blindvault-control terminal output passing mypy src/, ruff check ., ruff format --check ., and pytest -q"
+                loading="lazy"
+              />
+            </div>
+            <figcaption class="terminal-shot-caption">
+              <strong>Strict Type Checking, Linting &amp; Suite Summary</strong>
+              <span class="mono">mypy src/ &amp;&amp; ruff check . &amp;&amp; ruff format --check . &amp;&amp; pytest -q</span>
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. Tabbed Deploy & Quickstart Card -->
     <section class="deploy-section reveal-on-scroll" id="deploy">
       <div class="container">
         <div class="section-intro">

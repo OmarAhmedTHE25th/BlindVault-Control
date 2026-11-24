@@ -1779,6 +1779,60 @@ code {
   color: var(--accent-indigo);
 }
 
+/* Verified CLI & Terminal Test Screenshots */
+.terminal-gallery-section {
+  padding: 4.5rem 0;
+}
+
+.terminal-shot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.terminal-shot-card {
+  margin: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-shot-media {
+  background: #0b1120;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--border-card);
+}
+
+.terminal-shot-media img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+
+.terminal-shot-caption {
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.terminal-shot-caption strong {
+  color: var(--text-heading);
+  font-size: 0.95rem;
+}
+
+.terminal-shot-caption span {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  word-break: break-word;
+}
+
 /* Scroll Reveal */
 .reveal-on-scroll {
   opacity: 0;
@@ -1795,7 +1849,8 @@ code {
 @media (max-width: 1024px) {
   .hero-grid,
   .stepper-grid,
-  .explorer-shell {
+  .explorer-shell,
+  .terminal-shot-grid {
     grid-template-columns: 1fr;
   }
 

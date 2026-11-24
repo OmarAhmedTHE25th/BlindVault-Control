@@ -235,6 +235,12 @@ pytest -v
 - **`test_relay.py`** (6 tests): End-to-end 10 MiB binary stream transfer with SHA-256 verification, oversized frame rejection, text frame rejection (`1003`), early disconnect detach & teardown, unit lifecycle, cross-replica Redis Pub/Sub relay bridge.
 - **`test_rate_limiter.py`** (5 tests): IP handshake, invite creation, invite claim, relay creation rate limiting, and simulated-clock token-bucket refill.
 
+### Verified CLI & Terminal Test Runs
+
+| Pytest Verbose Suite (`pytest -v`, 41/41) | Type Checking, Linting & Pytest (`mypy`, `ruff`, `pytest -q`) |
+| :---: | :---: |
+| ![blindvault-control pytest -v run](docs/images/cli-pytest-run.png) | ![blindvault-control mypy ruff pytest terminal](docs/images/terminal-quality-checks.png) |
+
 ---
 
 ## Performance Benchmarks
